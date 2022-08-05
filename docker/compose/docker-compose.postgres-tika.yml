@@ -67,7 +67,7 @@ services:
       - data:/usr/src/paperless/data
       - media:/usr/src/paperless/media
       - export:/usr/src/paperless/export
-      - consume:/usr/src/paperless/consume
+      - /var/lib/docker/volumes/paperless-ngx_consume/_data:/usr/src/paperless/consume
     env_file: docker-compose.env
     environment:
       PAPERLESS_REDIS: redis://broker:6379
@@ -91,6 +91,5 @@ volumes:
   data:
   media:
   export:
-  consume:
   pgdata:
   redisdata:
