@@ -68,6 +68,8 @@ services:
       - media:/usr/src/paperless/media
       - export:/usr/src/paperless/export
       - /var/lib/docker/volumes/paperless-ngx_consume/_data:/usr/src/paperless/consume
+      - /home/user/docker/paperless-ngx/docker/compose/ssl.cert:/usr/src/paperless/data/ssl.cert
+      - /home/user/docker/paperless-ngx/docker/compose/ssl.key:/usr/src/paperless/data/ssl.key
     env_file: docker-compose.env
     environment:
       PAPERLESS_REDIS: redis://broker:6379
@@ -75,6 +77,7 @@ services:
       PAPERLESS_TIKA_ENABLED: 1
       PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
       PAPERLESS_TIKA_ENDPOINT: http://tika:9998
+      PAPERLESS_USE_SSL: true
 
   gotenberg:
     image: docker.io/gotenberg/gotenberg:7.4
