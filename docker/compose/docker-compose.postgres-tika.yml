@@ -83,6 +83,13 @@ services:
       PAPERLESS_TIKA_ENDPOINT: http://tika:9998
     networks:
       - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.paperless.rule=Host(`paperless.nuc10i7fnh.home.arpa`)"
+      - "traefik.http.routers.paperless.entrypoints=https"
+      - "traefik.http.routers.paperless.tls=true"
+      - "traefik.http.routers.paperless.service=paperless"
+      - "traefik.http.services.paperless.loadbalancer.server.port=8001"
 
   gotenberg:
     image: docker.io/gotenberg/gotenberg:7.4
