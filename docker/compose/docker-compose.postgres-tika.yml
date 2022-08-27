@@ -60,13 +60,6 @@ services:
       - broker
       - gotenberg
       - tika
-    ports:
-      - 8001:8000
-    healthcheck:
-      test: ["CMD", "curl", "-fs", "-S", "--max-time", "2", "http://localhost:8000"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
     volumes:
       - data:/usr/src/paperless/data
       - media:/usr/src/paperless/media
@@ -89,7 +82,7 @@ services:
       - "traefik.http.routers.paperless.entrypoints=https"
       - "traefik.http.routers.paperless.tls=true"
       - "traefik.http.routers.paperless.service=paperless"
-      - "traefik.http.services.paperless.loadbalancer.server.port=8001"
+      - "traefik.http.services.paperless.loadbalancer.server.port=8000"
 
   gotenberg:
     image: docker.io/gotenberg/gotenberg:7.4
