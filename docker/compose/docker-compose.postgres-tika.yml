@@ -75,12 +75,15 @@ services:
       PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
       PAPERLESS_TIKA_ENDPOINT: http://tika:9998
       PAPERLESS_URL: https://paperless.nuc10i7fnh.home.arpa
+      PAPERLESS_ENABLE_HTTP_REMOTE_USER: true
+      PAPERLESS_LOGOUT_REDIRECT_URL: https://authelia.nuc10i7fnh.home.arpa/logout
     networks:
       - traefik_proxy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.paperless.rule=Host(`paperless.nuc10i7fnh.home.arpa`)"
       - "traefik.http.routers.paperless.entrypoints=https"
+      - "traefik.http.routers.paperless.middlewares=authelia@docker"
       - "traefik.http.routers.paperless.middlewares=secured@file"
       - "traefik.http.routers.paperless.tls=true"
       - "traefik.http.routers.paperless.service=paperless"
