@@ -171,6 +171,7 @@ into paperless. It receives the following environment variables:
 * ``DOCUMENT_THUMBNAIL_URL``
 * ``DOCUMENT_CORRESPONDENT``
 * ``DOCUMENT_TAGS``
+* ``DOCUMENT_ORIGINAL_FILENAME``
 
 The script can be in any language, but for a simple shell script
 example, you can take a look at `post-consumption-example.sh`_ in this project.
@@ -217,7 +218,8 @@ using the identifier which it has assigned to each document. You will end up get
 files like ``0000123.pdf`` in your media directory. This isn't necessarily a bad
 thing, because you normally don't have to access these files manually. However, if
 you wish to name your files differently, you can do that by adjusting the
-``PAPERLESS_FILENAME_FORMAT`` configuration option.
+``PAPERLESS_FILENAME_FORMAT`` configuration option. Paperless adds the correct
+file extension e.g. ``.pdf``, ``.jpg`` automatically.
 
 This variable allows you to configure the filename (folders are allowed) using
 placeholders. For example, configuring this to

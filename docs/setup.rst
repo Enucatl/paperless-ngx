@@ -73,7 +73,7 @@ Paperless consists of the following components:
     for getting the tasks from the webserver and the consumer to the task scheduler. These run in a different
     process (maybe even on different machines!), and therefore, this is necessary.
 
-*   Optional: A database server. Paperless supports both PostgreSQL and SQLite for storing its data.
+*   Optional: A database server. Paperless supports PostgreSQL, MariaDB and SQLite for storing its data.
 
 
 Installation
@@ -317,11 +317,13 @@ writing. Windows is not and will never be supported.
     *   ``python3-pip``
     *   ``python3-dev``
 
+    *   ``default-libmysqlclient-dev`` for MariaDB
     *   ``fonts-liberation`` for generating thumbnails for plain text files
     *   ``imagemagick`` >= 6 for PDF conversion
     *   ``gnupg`` for handling encrypted documents
     *   ``libpq-dev`` for PostgreSQL
     *   ``libmagic-dev`` for mime type detection
+    *   ``mariadb-client`` for MariaDB compile time
     *   ``mime-support`` for mime type detection
     *   ``libzbar0`` for barcode detection
     *   ``poppler-utils`` for barcode detection
@@ -362,7 +364,7 @@ writing. Windows is not and will never be supported.
 2.  Install ``redis`` >= 5.0 and configure it to start automatically.
 
 3.  Optional. Install ``postgresql`` and configure a database, user and password for paperless. If you do not wish
-    to use PostgreSQL, SQLite is available as well.
+    to use PostgreSQL, MariaDB and SQLite are available as well.
 
     .. note::
 
@@ -378,6 +380,7 @@ writing. Windows is not and will never be supported.
     settings to your needs. Required settings for getting paperless running are:
 
     *   ``PAPERLESS_REDIS`` should point to your redis server, such as redis://localhost:6379.
+    *   ``PAPERLESS_DBENGINE`` optional, and should be one of `postgres, mariadb, or sqlite`
     *   ``PAPERLESS_DBHOST`` should be the hostname on which your PostgreSQL server is running. Do not configure this
         to use SQLite instead. Also configure port, database name, user and password as necessary.
     *   ``PAPERLESS_CONSUMPTION_DIR`` should point to a folder which paperless should watch for documents. You might
@@ -630,6 +633,48 @@ Migration to paperless-ngx is then performed in a few simple steps:
 
 10.  Optionally, follow the instructions below to migrate your existing data to PostgreSQL.
 
+
+Migrating from LinuxServer.io Docker Image
+========================
+
+As with any upgrades and large changes, it is highly recommended to create a backup before
+starting.  This assumes the image was running using Docker Compose, but the instructions
+are translatable to Docker commands as well.
+
+1.  Stop and remove the paperless container
+2.  If using an external database, stop the container
+3.  Update Redis configuration
+
+    a)  If ``REDIS_URL`` is already set, change it to ``PAPERLESS_REDIS`` and continue
+        to step 4.
+    b)  Otherwise, in the ``docker-compose.yml`` add a new service for Redis,
+        following `the example compose files <https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose>`_
+    b)  Set the environment variable ``PAPERLESS_REDIS`` so it points to the new Redis container
+
+4.  Update user mapping
+
+    a)  If set, change the environment variable ``PUID`` to ``USERMAP_UID``
+    b)  If set, change the environment variable ``PGID`` to ``USERMAP_GID``
+
+5.  Update configuration paths
+
+    a) Set the environment variable ``PAPERLESS_DATA_DIR``
+       to ``/config``
+
+6.  Update media paths
+
+    a) Set the environment variable ``PAPERLESS_MEDIA_ROOT``
+       to ``/data/media``
+
+7.  Update timezone
+
+    a) Set the environment variable ``PAPERLESS_TIME_ZONE``
+       to the same value as ``TZ``
+
+8.  Modify the ``image:`` to point to ``ghcr.io/paperless-ngx/paperless-ngx:latest`` or
+    a specific version if preferred.
+
+9.  Start the containers as before, using ``docker-compose``.
 
 .. _setup-sqlite_to_psql:
 

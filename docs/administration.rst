@@ -35,12 +35,14 @@ Options available to docker installations:
     ``/var/lib/docker/volumes`` on the host and you need to be root in order
     to access them.
 
-    Paperless uses 3 volumes:
+    Paperless uses 4 volumes:
 
     *   ``paperless_media``: This is where your documents are stored.
     *   ``paperless_data``: This is where auxillary data is stored. This
         folder also contains the SQLite database, if you use it.
     *   ``paperless_pgdata``: Exists only if you use PostgreSQL and contains
+        the database.
+    *   ``paperless_dbdata``: Exists only if you use MariaDB and contains
         the database.
 
 Options available to bare-metal and non-docker installations:
@@ -49,7 +51,7 @@ Options available to bare-metal and non-docker installations:
     crashes at some point or your disk fails, you can simply copy the folder back
     into place and it works.
 
-    When using PostgreSQL, you'll also have to backup the database.
+    When using PostgreSQL or MariaDB, you'll also have to backup the database.
 
 .. _migrating-restoring:
 
@@ -310,6 +312,7 @@ there are tools for it.
     -c, --correspondent
     -T, --tags
     -t, --document_type
+    -s, --storage_path
     -i, --inbox-only
     --use-first
     -f, --overwrite
@@ -318,7 +321,7 @@ Run this after changing or adding matching rules. It'll loop over all
 of the documents in your database and attempt to match documents
 according to the new rules.
 
-Specify any combination of ``-c``, ``-T`` and ``-t`` to have the
+Specify any combination of ``-c``, ``-T``, ``-t`` and ``-s`` to have the
 retagger perform matching of the specified metadata type. If you don't
 specify any of these options, the document retagger won't do anything.
 
@@ -443,6 +446,14 @@ command:
     mail_fetcher
 
 The command takes no arguments and processes all your mail accounts and rules.
+
+ .. note::
+
+    As of October 2022 Microsoft no longer supports IMAP authentication for Exchange
+    servers, thus Exchange is no longer supported until a solution is implemented in
+    the Python IMAP library used by Paperless. See  `learn.microsoft.com`_
+
+.. _learn.microsoft.com: https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online
 
 .. _utilities-archiver:
 
