@@ -46,9 +46,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: paperless
-      POSTGRES_USER: paperless
-      POSTGRES_PASSWORD: paperless
+      - POSTGRES_DB=paperless
+      - POSTGRES_USER=paperless
+      - POSTGRES_PASSWORD
     networks:
       - traefik_proxy
 
@@ -69,14 +69,18 @@ services:
       - /home/user/docker/paperless-ngx/docker/compose/ssl.key:/usr/src/paperless/data/ssl.key
     env_file: docker-compose.env
     environment:
-      PAPERLESS_REDIS: redis://broker:6379
-      PAPERLESS_DBHOST: db
-      PAPERLESS_TIKA_ENABLED: 1
-      PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
-      PAPERLESS_TIKA_ENDPOINT: http://tika:9998
-      PAPERLESS_URL: https://paperless.nuc10i7fnh.home.arpa
-      PAPERLESS_ENABLE_HTTP_REMOTE_USER: true
-      PAPERLESS_LOGOUT_REDIRECT_URL: https://authelia.nuc10i7fnh.home.arpa/logout
+      - USERMAP_UID
+      - USERMAP_GID
+      - PAPERLESS_DBPASS
+      - PAPERLESS_OCR_LANGUAGE
+      - PAPERLESS_REDIS=redis://broker:6379
+      - PAPERLESS_DBHOST=db
+      - PAPERLESS_TIKA_ENABLED=1
+      - PAPERLESS_TIKA_GOTENBERG_ENDPOINT=http://gotenberg:3000
+      - PAPERLESS_TIKA_ENDPOINT=http://tika:9998
+      - PAPERLESS_URL=https://paperless.nuc10i7fnh.home.arpa
+      - PAPERLESS_ENABLE_HTTP_REMOTE_USER=true
+      - PAPERLESS_LOGOUT_REDIRECT_URL=https://authelia.nuc10i7fnh.home.arpa/logout
     networks:
       - traefik_proxy
     labels:
