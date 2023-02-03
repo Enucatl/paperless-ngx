@@ -1,8 +1,12 @@
 import datetime
 import hashlib
 import os
+import shutil
+import tempfile
 import uuid
-from subprocess import Popen
+from pathlib import Path
+from subprocess import CompletedProcess
+from subprocess import run
 from typing import Optional
 from typing import Type
 
@@ -38,6 +42,8 @@ class ConsumerError(Exception):
 
 
 MESSAGE_DOCUMENT_ALREADY_EXISTS = "document_already_exists"
+MESSAGE_ASN_ALREADY_EXISTS = "asn_already_exists"
+MESSAGE_ASN_RANGE = "asn_value_out_of_range"
 MESSAGE_FILE_NOT_FOUND = "file_not_found"
 MESSAGE_PRE_CONSUME_SCRIPT_NOT_FOUND = "pre_consume_script_not_found"
 MESSAGE_PRE_CONSUME_SCRIPT_ERROR = "pre_consume_script_error"
@@ -91,12 +97,14 @@ class Consumer(LoggingMixin):
 
     def __init__(self):
         super().__init__()
-        self.path = None
+        self.path: Optional[Path] = None
+        self.original_path: Optional[Path] = None
         self.filename = None
         self.override_title = None
         self.override_correspondent_id = None
         self.override_tag_ids = None
         self.override_document_type_id = None
+        self.override_asn = None
         self.task_id = None
 
         self.channel_layer = get_channel_layer()
@@ -111,14 +119,16 @@ class Consumer(LoggingMixin):
     def pre_check_duplicate(self):
         with open(self.path, "rb") as f:
             checksum = hashlib.md5(f.read()).hexdigest()
-        if Document.objects.filter(
+        existing_doc = Document.objects.filter(
             Q(checksum=checksum) | Q(archive_checksum=checksum),
-        ).exists():
+        )
+        if existing_doc.exists():
             if settings.CONSUMER_DELETE_DUPLICATES:
                 os.unlink(self.path)
             self._fail(
                 MESSAGE_DOCUMENT_ALREADY_EXISTS,
-                f"Not consuming {self.filename}: It is a duplicate.",
+                f"Not consuming {self.filename}: It is a duplicate of"
+                f" {existing_doc.get().title} (#{existing_doc.get().pk})",
             )
 
     def pre_check_directories(self):
@@ -126,6 +136,27 @@ class Consumer(LoggingMixin):
         os.makedirs(settings.THUMBNAIL_DIR, exist_ok=True)
         os.makedirs(settings.ORIGINALS_DIR, exist_ok=True)
         os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
+    def pre_check_asn_value(self):
+        """
+        Check that if override_asn is given, it is unique and within a valid range
+        """
+        if not self.override_asn:
+            # check not necessary in case no ASN gets set
+            return
+        # Validate the range is above zero and less than uint32_t max
+        # otherwise, Whoosh can't handle it in the index
+        if self.override_asn < 0 or self.override_asn > 0xFF_FF_FF_FF:
+            self._fail(
+                MESSAGE_ASN_RANGE,
+                f"Not consuming {self.filename}: "
+                f"Given ASN {self.override_asn} is out of range [0, 4,294,967,295]",
+            )
+        if Document.objects.filter(archive_serial_number=self.override_asn).exists():
+            self._fail(
+                MESSAGE_ASN_ALREADY_EXISTS,
+                f"Not consuming {self.filename}: Given ASN already exists!",
+            )
 
     def run_pre_consume_script(self):
         if not settings.PRE_CONSUME_SCRIPT:
@@ -140,19 +171,28 @@ class Consumer(LoggingMixin):
 
         self.log("info", f"Executing pre-consume script {settings.PRE_CONSUME_SCRIPT}")
 
-        filepath_arg = os.path.normpath(self.path)
+        working_file_path = str(self.path)
+        original_file_path = str(self.original_path)
 
         script_env = os.environ.copy()
-        script_env["DOCUMENT_SOURCE_PATH"] = filepath_arg
+        script_env["DOCUMENT_SOURCE_PATH"] = original_file_path
+        script_env["DOCUMENT_WORKING_PATH"] = working_file_path
 
         try:
-            Popen(
-                (
+            completed_proc = run(
+                args=[
                     settings.PRE_CONSUME_SCRIPT,
-                    filepath_arg,
-                ),
+                    original_file_path,
+                ],
                 env=script_env,
-            ).wait()
+                capture_output=True,
+            )
+
+            self._log_script_outputs(completed_proc)
+
+            # Raises exception on non-zero output
+            completed_proc.check_returncode()
+
         except Exception as e:
             self._fail(
                 MESSAGE_PRE_CONSUME_SCRIPT_ERROR,
@@ -161,7 +201,7 @@ class Consumer(LoggingMixin):
                 exception=e,
             )
 
-    def run_post_consume_script(self, document):
+    def run_post_consume_script(self, document: Document):
         if not settings.POST_CONSUME_SCRIPT:
             return
 
@@ -206,8 +246,8 @@ class Consumer(LoggingMixin):
         script_env["DOCUMENT_ORIGINAL_FILENAME"] = str(document.original_filename)
 
         try:
-            Popen(
-                (
+            completed_proc = run(
+                args=[
                     settings.POST_CONSUME_SCRIPT,
                     str(document.pk),
                     document.get_public_filename(),
@@ -217,9 +257,16 @@ class Consumer(LoggingMixin):
                     reverse("document-thumb", kwargs={"pk": document.pk}),
                     str(document.correspondent),
                     str(",".join(document.tags.all().values_list("name", flat=True))),
-                ),
+                ],
                 env=script_env,
-            ).wait()
+                capture_output=True,
+            )
+
+            self._log_script_outputs(completed_proc)
+
+            # Raises exception on non-zero output
+            completed_proc.check_returncode()
+
         except Exception as e:
             self._fail(
                 MESSAGE_POST_CONSUME_SCRIPT_ERROR,
@@ -238,19 +285,21 @@ class Consumer(LoggingMixin):
         override_tag_ids=None,
         task_id=None,
         override_created=None,
+        override_asn=None,
     ) -> Document:
         """
         Return the document object if it was successfully created.
         """
 
-        self.path = path
-        self.filename = override_filename or os.path.basename(path)
+        self.path = Path(path).resolve()
+        self.filename = override_filename or self.path.name
         self.override_title = override_title
         self.override_correspondent_id = override_correspondent_id
         self.override_document_type_id = override_document_type_id
         self.override_tag_ids = override_tag_ids
         self.task_id = task_id or str(uuid.uuid4())
         self.override_created = override_created
+        self.override_asn = override_asn
 
         self._send_progress(0, 100, "STARTING", MESSAGE_NEW_FILE)
 
@@ -264,8 +313,18 @@ class Consumer(LoggingMixin):
         self.pre_check_file_exists()
         self.pre_check_directories()
         self.pre_check_duplicate()
+        self.pre_check_asn_value()
 
         self.log("info", f"Consuming {self.filename}")
+
+        # For the actual work, copy the file into a tempdir
+        self.original_path = self.path
+        tempdir = tempfile.TemporaryDirectory(
+            prefix="paperless-ngx",
+            dir=settings.SCRATCH_DIR,
+        )
+        self.path = Path(tempdir.name) / Path(self.filename)
+        shutil.copy(self.original_path, self.path)
 
         # Determine the parser class.
 
@@ -403,16 +462,18 @@ class Consumer(LoggingMixin):
 
                 # Don't save with the lock active. Saving will cause the file
                 # renaming logic to acquire the lock as well.
+                # This triggers things like file renaming
                 document.save()
 
                 # Delete the file only if it was successfully consumed
                 self.log("debug", f"Deleting file {self.path}")
                 os.unlink(self.path)
+                self.original_path.unlink()
 
                 # https://github.com/jonaswinkler/paperless-ng/discussions/1037
                 shadow_file = os.path.join(
-                    os.path.dirname(self.path),
-                    "._" + os.path.basename(self.path),
+                    os.path.dirname(self.original_path),
+                    "._" + os.path.basename(self.original_path),
                 )
 
                 if os.path.isfile(shadow_file):
@@ -429,6 +490,7 @@ class Consumer(LoggingMixin):
             )
         finally:
             document_parser.cleanup()
+            tempdir.cleanup()
 
         self.run_post_consume_script(document)
 
@@ -436,9 +498,17 @@ class Consumer(LoggingMixin):
 
         self._send_progress(100, 100, "SUCCESS", MESSAGE_FINISHED, document.id)
 
+        # Return the most up to date fields
+        document.refresh_from_db()
+
         return document
 
-    def _store(self, text, date, mime_type) -> Document:
+    def _store(
+        self,
+        text: str,
+        date: Optional[datetime.datetime],
+        mime_type: str,
+    ) -> Document:
 
         # If someone gave us the original filename, use it instead of doc.
 
@@ -500,7 +570,46 @@ class Consumer(LoggingMixin):
             for tag_id in self.override_tag_ids:
                 document.tags.add(Tag.objects.get(pk=tag_id))
 
+        if self.override_asn:
+            document.archive_serial_number = self.override_asn
+
     def _write(self, storage_type, source, target):
         with open(source, "rb") as read_file:
             with open(target, "wb") as write_file:
                 write_file.write(read_file.read())
+
+    def _log_script_outputs(self, completed_process: CompletedProcess):
+        """
+        Decodes a process stdout and stderr streams and logs them to the main log
+        """
+        # Log what the script exited as
+        self.log(
+            "info",
+            f"{completed_process.args[0]} exited {completed_process.returncode}",
+        )
+
+        # Decode the output (if any)
+        if len(completed_process.stdout):
+            stdout_str = (
+                completed_process.stdout.decode("utf8", errors="ignore")
+                .strip()
+                .split(
+                    "\n",
+                )
+            )
+            self.log("info", "Script stdout:")
+            for line in stdout_str:
+                self.log("info", line)
+
+        if len(completed_process.stderr):
+            stderr_str = (
+                completed_process.stderr.decode("utf8", errors="ignore")
+                .strip()
+                .split(
+                    "\n",
+                )
+            )
+
+            self.log("warning", "Script stderr:")
+            for line in stderr_str:
+                self.log("warning", line)

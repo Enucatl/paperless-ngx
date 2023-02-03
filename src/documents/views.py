@@ -7,10 +7,12 @@ import urllib
 import uuid
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from time import mktime
 from unicodedata import normalize
 from urllib.parse import quote
 
+import pathvalidate
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db.models import Case
@@ -28,7 +30,8 @@ from django.utils.translation import get_language
 from django.views.decorators.cache import cache_control
 from django.views.generic import TemplateView
 from django_filters.rest_framework import DjangoFilterBackend
-from django_q.tasks import async_task
+from documents.tasks import consume_file
+from langdetect import detect
 from packaging import version as packaging_version
 from paperless import version
 from paperless.db import GnuPG
@@ -173,7 +176,7 @@ class TagViewSet(ModelViewSet):
     permission_classes = (IsAuthenticated,)
     filter_backends = (DjangoFilterBackend, OrderingFilter)
     filterset_class = TagFilterSet
-    ordering_fields = ("name", "matching_algorithm", "match", "document_count")
+    ordering_fields = ("color", "name", "matching_algorithm", "match", "document_count")
 
 
 class DocumentTypeViewSet(ModelViewSet):
@@ -226,9 +229,11 @@ class DocumentViewSet(
             fields = fields_param.split(",")
         else:
             fields = None
+        truncate_content = self.request.query_params.get("truncate_content", "False")
         serializer_class = self.get_serializer_class()
         kwargs.setdefault("context", self.get_serializer_context())
         kwargs.setdefault("fields", fields)
+        kwargs.setdefault("truncate_content", truncate_content.lower() in ["true", "1"])
         return serializer_class(*args, **kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -261,6 +266,9 @@ class DocumentViewSet(
             file_handle = doc.source_file
             filename = doc.get_public_filename()
             mime_type = doc.mime_type
+            # Support browser previewing csv files by using text mime type
+            if mime_type in {"application/csv", "text/csv"} and disposition == "inline":
+                mime_type = "text/plain"
 
         if doc.storage_type == Document.STORAGE_TYPE_GPG:
             file_handle = GnuPG.decrypted(file_handle)
@@ -319,6 +327,13 @@ class DocumentViewSet(
             "archive_media_filename": doc.archive_filename,
             "original_filename": doc.original_filename,
         }
+
+        lang = "en"
+        try:
+            lang = detect(doc.content)
+        except Exception:
+            pass
+        meta["lang"] = lang
 
         if doc.has_archive_version:
             meta["archive_size"] = self.get_filesize(doc.archive_path)
@@ -430,6 +445,10 @@ class DocumentViewSet(
                 )
                 c.save()
 
+                from documents import index
+
+                index.add_or_update_document(self.get_object())
+
                 return Response(self.getComments(doc))
             except Exception as e:
                 logger.warning(f"An error occurred saving comment: {str(e)}")
@@ -441,6 +460,11 @@ class DocumentViewSet(
         elif request.method == "DELETE":
             comment = Comment.objects.get(id=int(request.GET.get("id")))
             comment.delete()
+
+            from documents import index
+
+            index.add_or_update_document(self.get_object())
+
             return Response(self.getComments(doc))
 
         return Response(
@@ -453,10 +477,14 @@ class DocumentViewSet(
 class SearchResultSerializer(DocumentSerializer):
     def to_representation(self, instance):
         doc = Document.objects.get(id=instance["id"])
+        comments = ",".join(
+            [str(c.comment) for c in Comment.objects.filter(document=instance["id"])],
+        )
         r = super().to_representation(doc)
         r["__search_hit__"] = {
             "score": instance.score,
-            "highlights": instance.highlights("content", text=doc.content)
+            "highlights": instance.highlights("content", text=doc.content),
+            "comment_highlights": instance.highlights("comments", text=comments)
             if doc
             else None,
             "rank": instance.rank,
@@ -601,31 +629,28 @@ class PostDocumentView(GenericAPIView):
 
         os.makedirs(settings.SCRATCH_DIR, exist_ok=True)
 
-        with tempfile.NamedTemporaryFile(
-            prefix="paperless-upload-",
-            dir=settings.SCRATCH_DIR,
-            delete=False,
-        ) as f:
-            f.write(doc_data)
-            os.utime(f.name, times=(t, t))
-            temp_filename = f.name
+        temp_file_path = Path(tempfile.mkdtemp(dir=settings.SCRATCH_DIR)) / Path(
+            pathvalidate.sanitize_filename(doc_name),
+        )
+
+        temp_file_path.write_bytes(doc_data)
+
+        os.utime(temp_file_path, times=(t, t))
 
         task_id = str(uuid.uuid4())
 
-        async_task(
-            "documents.tasks.consume_file",
-            temp_filename,
-            override_filename=doc_name,
+        async_task = consume_file.delay(
+            # Paths are not JSON friendly
+            str(temp_file_path),
             override_title=title,
             override_correspondent_id=correspondent_id,
             override_document_type_id=document_type_id,
             override_tag_ids=tag_ids,
             task_id=task_id,
-            task_name=os.path.basename(doc_name)[:100],
             override_created=created,
         )
 
-        return Response("OK")
+        return Response(async_task.id)
 
 
 class SelectionDataView(GenericAPIView):
@@ -744,6 +769,7 @@ class BulkDownloadView(GenericAPIView):
         ids = serializer.validated_data.get("documents")
         compression = serializer.validated_data.get("compression")
         content = serializer.validated_data.get("content")
+        follow_filename_format = serializer.validated_data.get("follow_formatting")
 
         os.makedirs(settings.SCRATCH_DIR, exist_ok=True)
         temp = tempfile.NamedTemporaryFile(
@@ -760,7 +786,7 @@ class BulkDownloadView(GenericAPIView):
             strategy_class = ArchiveOnlyStrategy
 
         with zipfile.ZipFile(temp.name, "w", compression) as zipf:
-            strategy = strategy_class(zipf)
+            strategy = strategy_class(zipf, follow_filename_format)
             for id in ids:
                 doc = Document.objects.get(id=id)
                 strategy.add_document(doc)
@@ -780,42 +806,38 @@ class RemoteVersionView(GenericAPIView):
         remote_version = "0.0.0"
         is_greater_than_current = False
         current_version = packaging_version.parse(version.__full_version_str__)
-        # TODO: this can likely be removed when frontend settings are saved to DB
-        feature_is_set = settings.ENABLE_UPDATE_CHECK != "default"
-        if feature_is_set and settings.ENABLE_UPDATE_CHECK:
-            try:
-                req = urllib.request.Request(
-                    "https://api.github.com/repos/paperless-ngx/"
-                    "paperless-ngx/releases/latest",
-                )
-                # Ensure a JSON response
-                req.add_header("Accept", "application/json")
-
-                with urllib.request.urlopen(req) as response:
-                    remote = response.read().decode("utf-8")
-                try:
-                    remote_json = json.loads(remote)
-                    remote_version = remote_json["tag_name"]
-                    # Basically PEP 616 but that only went in 3.9
-                    if remote_version.startswith("ngx-"):
-                        remote_version = remote_version[len("ngx-") :]
-                except ValueError:
-                    logger.debug("An error occurred parsing remote version json")
-            except urllib.error.URLError:
-                logger.debug("An error occurred checking for available updates")
-
-            is_greater_than_current = (
-                packaging_version.parse(
-                    remote_version,
-                )
-                > current_version
+        try:
+            req = urllib.request.Request(
+                "https://api.github.com/repos/paperless-ngx/"
+                "paperless-ngx/releases/latest",
             )
+            # Ensure a JSON response
+            req.add_header("Accept", "application/json")
+
+            with urllib.request.urlopen(req) as response:
+                remote = response.read().decode("utf-8")
+            try:
+                remote_json = json.loads(remote)
+                remote_version = remote_json["tag_name"]
+                # Basically PEP 616 but that only went in 3.9
+                if remote_version.startswith("ngx-"):
+                    remote_version = remote_version[len("ngx-") :]
+            except ValueError:
+                logger.debug("An error occurred parsing remote version json")
+        except urllib.error.URLError:
+            logger.debug("An error occurred checking for available updates")
+
+        is_greater_than_current = (
+            packaging_version.parse(
+                remote_version,
+            )
+            > current_version
+        )
 
         return Response(
             {
                 "version": remote_version,
                 "update_available": is_greater_than_current,
-                "feature_is_set": feature_is_set,
             },
         )
 
@@ -848,15 +870,23 @@ class UiSettingsView(GenericAPIView):
         displayname = user.username
         if user.first_name or user.last_name:
             displayname = " ".join([user.first_name, user.last_name])
-        settings = {}
+        ui_settings = {}
         if hasattr(user, "ui_settings"):
-            settings = user.ui_settings.settings
+            ui_settings = user.ui_settings.settings
+        if "update_checking" in ui_settings:
+            ui_settings["update_checking"][
+                "backend_setting"
+            ] = settings.ENABLE_UPDATE_CHECK
+        else:
+            ui_settings["update_checking"] = {
+                "backend_setting": settings.ENABLE_UPDATE_CHECK,
+            }
         return Response(
             {
                 "user_id": user.id,
                 "username": user.username,
                 "display_name": displayname,
-                "settings": settings,
+                "settings": ui_settings,
             },
         )
 
@@ -878,13 +908,18 @@ class TasksViewSet(ReadOnlyModelViewSet):
     permission_classes = (IsAuthenticated,)
     serializer_class = TasksViewSerializer
 
-    queryset = (
-        PaperlessTask.objects.filter(
-            acknowledged=False,
+    def get_queryset(self):
+        queryset = (
+            PaperlessTask.objects.filter(
+                acknowledged=False,
+            )
+            .order_by("date_created")
+            .reverse()
         )
-        .order_by("created")
-        .reverse()
-    )
+        task_id = self.request.query_params.get("task_id")
+        if task_id is not None:
+            queryset = PaperlessTask.objects.filter(task_id=task_id)
+        return queryset
 
 
 class AcknowledgeTasksView(GenericAPIView):

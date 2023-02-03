@@ -24,6 +24,7 @@ from imap_tools import NOT
 from paperless_mail import tasks
 from paperless_mail.mail import MailAccountHandler
 from paperless_mail.mail import MailError
+from paperless_mail.mail import TagMailAction
 from paperless_mail.models import MailAccount
 from paperless_mail.models import MailRule
 
@@ -47,14 +48,15 @@ class BogusFolderManager:
 
 
 class BogusClient:
+    def __init__(self, messages):
+        self.messages: List[MailMessage] = messages
+        self.capabilities: List[str] = []
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
-
-    def __init__(self, messages):
-        self.messages: List[MailMessage] = messages
 
     def authenticate(self, mechanism, authobject):
         # authobject must be a callable object
@@ -68,7 +70,7 @@ class BogusClient:
                 if message.uid == args[0]:
                     flag = args[2]
                     if flag == "processed":
-                        message._raw_flag_data.append(f"+FLAGS (processed)".encode())
+                        message._raw_flag_data.append(b"+FLAGS (processed)")
                         MailMessage.flags.fget.cache_clear()
 
 
@@ -80,18 +82,18 @@ class BogusMailBox(ContextManager):
     # Note the non-ascii characters here
     UTF_PASSWORD: str = "w57äöüw4b6huwb6nhu"
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
     def __init__(self):
         self.messages: List[MailMessage] = []
         self.messages_spam: List[MailMessage] = []
         self.folder = BogusFolderManager()
         self.client = BogusClient(self.messages)
         self._host = ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
     def updateClient(self):
         self.client = BogusClient(self.messages)
@@ -152,7 +154,7 @@ class BogusMailBox(ContextManager):
                     if flag == MailMessageFlags.SEEN:
                         message.seen = value
                     if flag == "processed":
-                        message._raw_flag_data.append(f"+FLAGS (processed)".encode())
+                        message._raw_flag_data.append(b"+FLAGS (processed)")
                         MailMessage.flags.fget.cache_clear()
 
     def move(self, uid_list, folder):
@@ -222,7 +224,7 @@ def create_message(
     imap_msg.seen = seen
     imap_msg.flagged = flagged
     if processed:
-        imap_msg._raw_flag_data.append(f"+FLAGS (processed)".encode())
+        imap_msg._raw_flag_data.append(b"+FLAGS (processed)")
         MailMessage.flags.fget.cache_clear()
 
     return imap_msg
@@ -247,7 +249,7 @@ class TestMail(DirectoriesMixin, TestCase):
         m.return_value = self.bogus_mailbox
         self.addCleanup(patcher.stop)
 
-        patcher = mock.patch("paperless_mail.mail.async_task")
+        patcher = mock.patch("paperless_mail.mail.consume_file.delay")
         self.async_task = patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -648,6 +650,7 @@ class TestMail(DirectoriesMixin, TestCase):
 
     def test_handle_mail_account_tag_gmail(self):
         self.bogus_mailbox._host = "imap.gmail.com"
+        self.bogus_mailbox.client.capabilities = ["X-GM-EXT-1"]
 
         account = MailAccount.objects.create(
             name="test",
@@ -670,6 +673,39 @@ class TestMail(DirectoriesMixin, TestCase):
         self.mail_account_handler.handle_mail_account(account)
         self.assertEqual(self.async_task.call_count, 2)
         self.assertEqual(len(self.bogus_mailbox.fetch(criteria, False)), 0)
+        self.assertEqual(len(self.bogus_mailbox.messages), 3)
+
+    def test_tag_mail_action_applemail_wrong_input(self):
+
+        self.assertRaises(
+            MailError,
+            TagMailAction,
+            "apple:black",
+        )
+
+    def test_handle_mail_account_tag_applemail(self):
+        # all mails will be FLAGGED afterwards
+
+        account = MailAccount.objects.create(
+            name="test",
+            imap_server="",
+            username="admin",
+            password="secret",
+        )
+
+        _ = MailRule.objects.create(
+            name="testrule",
+            account=account,
+            action=MailRule.MailAction.TAG,
+            action_parameter="apple:green",
+        )
+
+        self.assertEqual(len(self.bogus_mailbox.messages), 3)
+        self.assertEqual(self.async_task.call_count, 0)
+        self.assertEqual(len(self.bogus_mailbox.fetch("UNFLAGGED", False)), 2)
+        self.mail_account_handler.handle_mail_account(account)
+        self.assertEqual(self.async_task.call_count, 2)
+        self.assertEqual(len(self.bogus_mailbox.fetch("UNFLAGGED", False)), 0)
         self.assertEqual(len(self.bogus_mailbox.messages), 3)
 
     def test_error_login(self):
@@ -1030,20 +1066,3 @@ class TestTasks(TestCase):
         m.side_effect = lambda account: 0
         result = tasks.process_mail_accounts()
         self.assertIn("No new", result)
-
-    @mock.patch("paperless_mail.tasks.MailAccountHandler.handle_mail_account")
-    def test_single_accounts(self, m):
-        MailAccount.objects.create(
-            name="A",
-            imap_server="A",
-            username="A",
-            password="A",
-        )
-
-        tasks.process_mail_account("A")
-
-        m.assert_called_once()
-        m.reset_mock()
-
-        tasks.process_mail_account("B")
-        m.assert_not_called()

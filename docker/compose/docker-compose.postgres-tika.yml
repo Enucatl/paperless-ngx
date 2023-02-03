@@ -93,17 +93,23 @@ services:
       - "traefik.http.services.paperless.loadbalancer.server.port=8000"
 
   gotenberg:
-    image: docker.io/gotenberg/gotenberg:7.4
+    image: docker.io/gotenberg/gotenberg:7.6
     restart: unless-stopped
-    networks:
-      - traefik_proxy
+    # The gotenberg chromium route is used to convert .eml files. We do not
+    # want to allow external content like tracking pixels or even javascript.
     command:
       - "gotenberg"
-      - "--chromium-disable-routes=true"
+      - "--chromium-disable-javascript=true"
+      - "--chromium-allow-list=file:///tmp/.*"
+    networks:
+      - traefik_proxy
 
   tika:
     image: ghcr.io/paperless-ngx/tika:latest
     restart: unless-stopped
+    networks:
+      - traefik_proxy
+
 
 volumes:
   data:

@@ -2,21 +2,63 @@ import logging
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 from typing import Optional
-from typing import Tuple
 
 import magic
 from django.conf import settings
+from pdf2image import convert_from_path
+from pdf2image.exceptions import PDFPageCountError
 from pikepdf import Page
 from pikepdf import Pdf
-from pikepdf import PdfImage
 from PIL import Image
 from PIL import ImageSequence
 from pyzbar import pyzbar
 
 logger = logging.getLogger("paperless.barcodes")
+
+
+class BarcodeImageFormatError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Barcode:
+    """
+    Holds the information about a single barcode and its location
+    """
+
+    page: int
+    value: str
+
+    @property
+    def is_separator(self) -> bool:
+        """
+        Returns True if the barcode value equals the configured separation value,
+        False otherwise
+        """
+        return self.value == settings.CONSUMER_BARCODE_STRING
+
+    @property
+    def is_asn(self) -> bool:
+        """
+        Returns True if the barcode value matches the configured ASN prefix,
+        False otherwise
+        """
+        return self.value.startswith(settings.CONSUMER_ASN_BARCODE_PREFIX)
+
+
+@dataclass
+class DocumentBarcodeInfo:
+    """
+    Describes a single document's barcode status
+    """
+
+    pdf_path: Path
+    barcodes: List[Barcode]
 
 
 @lru_cache(maxsize=8)
@@ -93,7 +135,7 @@ def convert_from_tiff_to_pdf(filepath: str) -> str:
                 images[0].save(newpath)
             else:
                 images[0].save(newpath, save_all=True, append_images=images[1:])
-        except OSError as e:
+        except OSError as e:  # pragma: no cover
             logger.warning(
                 f"Could not save the file as pdf. Error: {str(e)}",
             )
@@ -101,39 +143,103 @@ def convert_from_tiff_to_pdf(filepath: str) -> str:
     return newpath
 
 
-def scan_file_for_separating_barcodes(filepath: str) -> Tuple[Optional[str], List[int]]:
+def scan_file_for_barcodes(
+    filepath: str,
+) -> DocumentBarcodeInfo:
     """
-    Scan the provided pdf file for page separating barcodes
-    Returns a PDF filepath and a list of pagenumbers,
-    which separate the file into new files
+    Scan the provided pdf file for any barcodes
+    Returns a PDF filepath and a list of
+    (page_number, barcode_text) tuples
     """
 
-    separator_page_numbers = []
+    def _pdf2image_barcode_scan(pdf_filepath: str) -> List[Barcode]:
+        detected_barcodes = []
+        # use a temporary directory in case the file is too big to handle in memory
+        with tempfile.TemporaryDirectory() as path:
+            pages_from_path = convert_from_path(
+                pdf_filepath,
+                dpi=300,
+                output_folder=path,
+            )
+            for current_page_number, page in enumerate(pages_from_path):
+                for barcode_value in barcode_reader(page):
+                    detected_barcodes.append(
+                        Barcode(current_page_number, barcode_value),
+                    )
+        return detected_barcodes
+
     pdf_filepath = None
-
     mime_type = get_file_mime_type(filepath)
+    barcodes = []
 
     if supported_file_type(mime_type):
         pdf_filepath = filepath
         if mime_type == "image/tiff":
             pdf_filepath = convert_from_tiff_to_pdf(filepath)
 
-        pdf = Pdf.open(pdf_filepath)
-
-        for page_num, page in enumerate(pdf.pages):
-            for image_key in page.images:
-                pdfimage = PdfImage(page.images[image_key])
-                pillow_img = pdfimage.as_pil_image()
-
-                detected_barcodes = barcode_reader(pillow_img)
-
-                if settings.CONSUMER_BARCODE_STRING in detected_barcodes:
-                    separator_page_numbers.append(page_num)
+        # Always try pikepdf first, it's usually fine, faster and
+        # uses less memory
+        try:
+            barcodes = _pdf2image_barcode_scan(pdf_filepath)
+        # Password protected files can't be checked
+        # This is the exception raised for those
+        except PDFPageCountError as e:
+            logger.warning(
+                f"File is likely password protected, not checking for barcodes: {e}",
+            )
+        # This file is really borked, allow the consumption to continue
+        # but it may fail further on
+        except Exception as e:  # pragma: no cover
+            logger.warning(
+                f"Exception during barcode scanning: {e}",
+            )
     else:
         logger.warning(
             f"Unsupported file format for barcode reader: {str(mime_type)}",
         )
-    return pdf_filepath, separator_page_numbers
+
+    return DocumentBarcodeInfo(pdf_filepath, barcodes)
+
+
+def get_separating_barcodes(barcodes: List[Barcode]) -> List[int]:
+    """
+    Search the parsed barcodes for separators
+    and returns a list of page numbers, which
+    separate the file into new files.
+    """
+    # filter all barcodes for the separator string
+    # get the page numbers of the separating barcodes
+
+    return list({bc.page for bc in barcodes if bc.is_separator})
+
+
+def get_asn_from_barcodes(barcodes: List[Barcode]) -> Optional[int]:
+    """
+    Search the parsed barcodes for any ASNs.
+    The first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
+    is considered the ASN to be used.
+    Returns the detected ASN (or None)
+    """
+    asn = None
+
+    # get the first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
+    asn_text = next(
+        (x.value for x in barcodes if x.is_asn),
+        None,
+    )
+
+    if asn_text:
+        logger.debug(f"Found ASN Barcode: {asn_text}")
+        # remove the prefix and remove whitespace
+        asn_text = asn_text[len(settings.CONSUMER_ASN_BARCODE_PREFIX) :].strip()
+
+        # now, try parsing the ASN number
+        try:
+            asn = int(asn_text)
+        except ValueError as e:
+            logger.warning(f"Failed to parse ASN number because: {e}")
+
+    return asn
 
 
 def separate_pages(filepath: str, pages_to_split_on: List[int]) -> List[str]:

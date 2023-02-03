@@ -10,6 +10,7 @@ export interface SearchHit {
   rank?: number
 
   highlights?: string
+  comment_highlights?: string
 }
 
 export interface PaperlessDocument extends ObjectWithId {
@@ -29,8 +30,6 @@ export interface PaperlessDocument extends ObjectWithId {
 
   content?: string
 
-  file_type?: string
-
   tags$?: Observable<PaperlessTag[]>
 
   tags?: number[]
@@ -47,7 +46,7 @@ export interface PaperlessDocument extends ObjectWithId {
 
   added?: Date
 
-  file_name?: string
+  original_file_name?: string
 
   download_url?: string
 

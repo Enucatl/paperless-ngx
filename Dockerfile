@@ -1,19 +1,5 @@
 # syntax=docker/dockerfile:1.4
 
-# Pull the installer images from the library
-# These are all built previously
-# They provide either a .deb or .whl
-
-ARG JBIG2ENC_VERSION
-ARG QPDF_VERSION
-ARG PIKEPDF_VERSION
-ARG PSYCOPG2_VERSION
-
-FROM ghcr.io/paperless-ngx/paperless-ngx/builder/jbig2enc:${JBIG2ENC_VERSION} as jbig2enc-builder
-FROM ghcr.io/paperless-ngx/paperless-ngx/builder/qpdf:${QPDF_VERSION} as qpdf-builder
-FROM ghcr.io/paperless-ngx/paperless-ngx/builder/pikepdf:${PIKEPDF_VERSION} as pikepdf-builder
-FROM ghcr.io/paperless-ngx/paperless-ngx/builder/psycopg2:${PSYCOPG2_VERSION} as psycopg2-builder
-
 FROM --platform=$BUILDPLATFORM node:16-bullseye-slim AS compile-frontend
 
 # This stage compiles the frontend
@@ -30,57 +16,82 @@ RUN set -eux \
 RUN set -eux \
   && ./node_modules/.bin/ng build --configuration production
 
+FROM --platform=$BUILDPLATFORM python:3.9-slim-bullseye as pipenv-base
+
+# This stage generates the requirements.txt file using pipenv
+# This stage runs once for the native platform, as the outputs are not
+# dependent on target arch
+# This way, pipenv dependencies are not left in the final image
+# nor can pipenv mess up the final image somehow
+# Inputs: None
+
+WORKDIR /usr/src/pipenv
+
+COPY Pipfile* ./
+
+RUN set -eux \
+  && echo "Installing pipenv" \
+    && python3 -m pip install --no-cache-dir --upgrade pipenv==2022.11.30 \
+  && echo "Generating requirement.txt" \
+    && pipenv requirements > requirements.txt
+
 FROM python:3.9-slim-bullseye as main-app
 
 LABEL org.opencontainers.image.authors="paperless-ngx team <hello@paperless-ngx.com>"
-LABEL org.opencontainers.image.documentation="https://paperless-ngx.readthedocs.io/en/latest/"
+LABEL org.opencontainers.image.documentation="https://docs.paperless-ngx.com/"
 LABEL org.opencontainers.image.source="https://github.com/paperless-ngx/paperless-ngx"
 LABEL org.opencontainers.image.url="https://github.com/paperless-ngx/paperless-ngx"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 
 ARG DEBIAN_FRONTEND=noninteractive
+# Buildx provided, must be defined to use though
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+# Workflow provided
+ARG JBIG2ENC_VERSION
+ARG QPDF_VERSION
+ARG PIKEPDF_VERSION
+ARG PSYCOPG2_VERSION
 
 #
 # Begin installation and configuration
 # Order the steps below from least often changed to most
 #
 
-# copy jbig2enc
-# Basically will never change again
-COPY --from=jbig2enc-builder /usr/src/jbig2enc/src/.libs/libjbig2enc* /usr/local/lib/
-COPY --from=jbig2enc-builder /usr/src/jbig2enc/src/jbig2 /usr/local/bin/
-COPY --from=jbig2enc-builder /usr/src/jbig2enc/src/*.h /usr/local/include/
-
 # Packages need for running
 ARG RUNTIME_PACKAGES="\
+  # Python
+  python3 \
+  python3-pip \
+  python3-setuptools \
+  # General utils
   curl \
-  file \
+  # Docker specific
+  gosu \
+  # Timezones support
+  tzdata \
   # fonts for text file thumbnail generation
   fonts-liberation \
   gettext \
   ghostscript \
   gnupg \
-  gosu \
   icc-profiles-free \
   imagemagick \
-  media-types \
+  # Image processing
   liblept5 \
-  libpq5 \
-  libxml2 \
   liblcms2-2 \
   libtiff5 \
-  libxslt1.1 \
   libfreetype6 \
   libwebp6 \
   libopenjp2-7 \
   libimagequant0 \
   libraqm0 \
-  libgnutls30 \
   libjpeg62-turbo \
-  python3 \
-  python3-pip \
-  python3-setuptools \
+  # PostgreSQL
+  libpq5 \
   postgresql-client \
+  # MySQL / MariaDB
   mariadb-client \
   # For Numpy
   libatlas3-base \
@@ -91,17 +102,23 @@ ARG RUNTIME_PACKAGES="\
   tesseract-ocr-fra \
   tesseract-ocr-ita \
   tesseract-ocr-spa \
-  # Suggested for OCRmyPDF
-  pngquant \
-  # Suggested for pikepdf
-  jbig2dec \
-  tzdata \
   unpaper \
+  pngquant \
+  # pikepdf / qpdf
+  jbig2dec \
+  libxml2 \
+  libxslt1.1 \
+  libgnutls30 \
   # Mime type detection
+  file \
+  libmagic1 \
+  media-types \
   zlib1g \
   # Barcode splitter
   libzbar0 \
-  poppler-utils"
+  poppler-utils \
+  # RapidFuzz on armv7
+  libatomic1"
 
 # Install basic runtime packages.
 # These change very infrequently
@@ -131,7 +148,9 @@ COPY [ \
   "docker/docker-prepare.sh", \
   "docker/paperless_cmd.sh", \
   "docker/wait-for-redis.py", \
+  "docker/env-from-file.sh", \
   "docker/management_script.sh", \
+  "docker/flower-conditional.sh", \
   "docker/install_management_commands.sh", \
   "/usr/src/paperless/src/docker/" \
 ]
@@ -149,8 +168,12 @@ RUN set -eux \
     && chmod 755 /sbin/docker-prepare.sh \
     && mv wait-for-redis.py /sbin/wait-for-redis.py \
     && chmod 755 /sbin/wait-for-redis.py \
+    && mv env-from-file.sh /sbin/env-from-file.sh \
+    && chmod 755 /sbin/env-from-file.sh \
     && mv paperless_cmd.sh /usr/local/bin/paperless_cmd.sh \
     && chmod 755 /usr/local/bin/paperless_cmd.sh \
+    && mv flower-conditional.sh /usr/local/bin/flower-conditional.sh \
+    && chmod 755 /usr/local/bin/flower-conditional.sh \
   && echo "Installing managment commands" \
     && chmod +x install_management_commands.sh \
     && ./install_management_commands.sh
@@ -158,29 +181,35 @@ RUN set -eux \
 # Install the built packages from the installer library images
 # Use mounts to avoid copying installer files into the image
 # These change sometimes
-RUN --mount=type=bind,from=qpdf-builder,target=/qpdf \
-    --mount=type=bind,from=psycopg2-builder,target=/psycopg2 \
-    --mount=type=bind,from=pikepdf-builder,target=/pikepdf \
-  set -eux \
+RUN set -eux \
+  && echo "Getting binaries" \
+    && mkdir paperless-ngx \
+    && curl --fail --silent --show-error --output paperless-ngx.tar.gz --location https://github.com/paperless-ngx/paperless-ngx/archive/41d6e7e407af09a0882736d50c89b6e015997bff.tar.gz \
+    && tar -xf paperless-ngx.tar.gz --directory paperless-ngx --strip-components=1 \
+    && cd paperless-ngx \
+    # Setting a specific revision ensures we know what this installed
+    # and ensures cache breaking on changes
+  && echo "Installing jbig2enc" \
+    && cp ./jbig2enc/${JBIG2ENC_VERSION}/${TARGETARCH}${TARGETVARIANT}/jbig2 /usr/local/bin/ \
+    && cp ./jbig2enc/${JBIG2ENC_VERSION}/${TARGETARCH}${TARGETVARIANT}/libjbig2enc* /usr/local/lib/ \
   && echo "Installing qpdf" \
-    && apt-get install --yes --no-install-recommends /qpdf/usr/src/qpdf/libqpdf28_*.deb \
-    && apt-get install --yes --no-install-recommends /qpdf/usr/src/qpdf/qpdf_*.deb \
+    && apt-get install --yes --no-install-recommends ./qpdf/${QPDF_VERSION}/${TARGETARCH}${TARGETVARIANT}/libqpdf29_*.deb \
+    && apt-get install --yes --no-install-recommends ./qpdf/${QPDF_VERSION}/${TARGETARCH}${TARGETVARIANT}/qpdf_*.deb \
   && echo "Installing pikepdf and dependencies" \
-    && python3 -m pip install --no-cache-dir /pikepdf/usr/src/wheels/pyparsing*.whl \
-    && python3 -m pip install --no-cache-dir /pikepdf/usr/src/wheels/packaging*.whl \
-    && python3 -m pip install --no-cache-dir /pikepdf/usr/src/wheels/lxml*.whl \
-    && python3 -m pip install --no-cache-dir /pikepdf/usr/src/wheels/Pillow*.whl \
-    && python3 -m pip install --no-cache-dir /pikepdf/usr/src/wheels/pikepdf*.whl \
+    && python3 -m pip install --no-cache-dir ./pikepdf/${PIKEPDF_VERSION}/${TARGETARCH}${TARGETVARIANT}/*.whl \
     && python3 -m pip list \
   && echo "Installing psycopg2" \
-    && python3 -m pip install --no-cache-dir /psycopg2/usr/src/wheels/psycopg2*.whl \
-    && python3 -m pip list
+    && python3 -m pip install --no-cache-dir ./psycopg2/${PSYCOPG2_VERSION}/${TARGETARCH}${TARGETVARIANT}/psycopg2*.whl \
+    && python3 -m pip list \
+  && echo "Cleaning up image layer" \
+    && cd ../ \
+    && rm -rf paperless-ngx
 
 WORKDIR /usr/src/paperless/src/
 
 # Python dependencies
 # Change pretty frequently
-COPY Pipfile* ./
+COPY --from=pipenv-base /usr/src/pipenv/requirements.txt ./
 
 # Packages needed only for building a few quick Python
 # dependencies
@@ -195,24 +224,16 @@ RUN set -eux \
     && apt-get update \
     && apt-get install --yes --quiet --no-install-recommends ${BUILD_PACKAGES} \
     && python3 -m pip install --no-cache-dir --upgrade wheel \
-  && echo "Installing pipenv" \
-    && python3 -m pip install --no-cache-dir --upgrade pipenv \
   && echo "Installing Python requirements" \
-    # pipenv tries to be too fancy and prints so much junk
-    && pipenv requirements > requirements.txt \
     && python3 -m pip install --default-timeout=1000 --no-cache-dir --requirement requirements.txt \
-    && rm requirements.txt \
+  && echo "Installing NLTK data" \
+    && python3 -W ignore::RuntimeWarning -m nltk.downloader -d "/usr/share/nltk_data" snowball_data \
+    && python3 -W ignore::RuntimeWarning -m nltk.downloader -d "/usr/share/nltk_data" stopwords \
+    && python3 -W ignore::RuntimeWarning -m nltk.downloader -d "/usr/share/nltk_data" punkt \
   && echo "Cleaning up image" \
     && apt-get -y purge ${BUILD_PACKAGES} \
     && apt-get -y autoremove --purge \
     && apt-get clean --yes \
-    # Remove pipenv and its unique packages
-    && python3 -m pip uninstall --yes \
-      pipenv \
-      distlib \
-      platformdirs \
-      virtualenv \
-      virtualenv-clone \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
     && rm -rf /var/tmp/* \
