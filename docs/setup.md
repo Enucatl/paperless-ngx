@@ -33,6 +33,11 @@ steps described in [Docker setup](#docker_hub) automatically.
     $ bash -c "$(curl -L https://raw.githubusercontent.com/paperless-ngx/paperless-ngx/main/install-paperless-ngx.sh)"
     ```
 
+    !!! note
+
+        macOS users will need to install e.g. [gnu-sed](https://formulae.brew.sh/formula/gnu-sed) with support
+        for running as `sed`.
+
 ### From GHCR / Docker Hub {#docker_hub}
 
 1.  Login with your user and create a folder in your home-directory to have a place for your
@@ -43,7 +48,7 @@ steps described in [Docker setup](#docker_hub) automatically.
     ```
 
 2.  Go to the [/docker/compose directory on the project
-    page](https://github.com/paperless-ngx/paperless-ngx/tree/master/docker/compose)
+    page](https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose)
     and download one of the `docker-compose.*.yml` files,
     depending on which database backend you want to use. Rename this
     file to `docker-compose.yml`. If you want to enable
@@ -160,8 +165,7 @@ steps described in [Docker setup](#docker_hub) automatically.
         `PAPERLESS_CONSUMER_POLLING`, which will disable inotify. See
         [here](/configuration#polling).
 
-6.  Run `docker-compose pull`, followed by `docker-compose up -d`. This
-    will pull the image, create and start the necessary containers.
+6.  Run `docker-compose pull`. This will pull the image.
 
 7.  To be able to login, you will need a super user. To create it,
     execute the following command:
@@ -170,10 +174,18 @@ steps described in [Docker setup](#docker_hub) automatically.
     $ docker-compose run --rm webserver createsuperuser
     ```
 
+    or using docker exec from within the container:
+
+    ```shell-session
+    $ python3 manage.py createsuperuser
+    ```
+
     This will prompt you to set a username, an optional e-mail address
     and finally a password (at least 8 characters).
 
-8.  The default `docker-compose.yml` exports the webserver on your local
+8.  Run `docker-compose up -d`. This will create and start the necessary containers.
+
+9.  The default `docker-compose.yml` exports the webserver on your local
     port
 
     8000\. If you did not change this, you should now be able to visit
@@ -189,7 +201,7 @@ steps described in [Docker setup](#docker_hub) automatically.
     git clone https://github.com/paperless-ngx/paperless-ngx
     ```
 
-    The master branch always reflects the latest stable version.
+    The main branch always reflects the latest stable version.
 
 2.  Copy one of the `docker/compose/docker-compose.*.yml` to
     `docker-compose.yml` in the root folder, depending on which database
@@ -365,6 +377,10 @@ supported.
       documents are written in.
     - Set `PAPERLESS_TIME_ZONE` to your local time zone.
 
+    !!! warning
+
+        Ensure your Redis instance [is secured](https://redis.io/docs/getting-started/#securing-redis).
+
 7.  Create the following directories if they are missing:
 
     - `/opt/paperless/media`
@@ -467,7 +483,7 @@ supported.
         in front of gunicorn instead.
 
         For instructions on how to use nginx for that,
-        [see the instructions below](/setup#nginx).
+        [see the wiki](https://github.com/paperless-ngx/paperless-ngx/wiki/Using-a-Reverse-Proxy-with-Paperless-ngx#nginx).
 
     !!! warning
 
@@ -543,7 +559,7 @@ Users who installed with the bare-metal route should also update their
 Git clone to point to `https://github.com/paperless-ngx/paperless-ngx`,
 e.g. using the command
 `git remote set-url origin https://github.com/paperless-ngx/paperless-ngx`
-and then pull the lastest version.
+and then pull the latest version.
 
 ## Migrating from Paperless
 
@@ -585,7 +601,7 @@ Migration to paperless-ngx is then performed in a few simple steps:
 
 3.  Download the latest release of paperless-ngx. You can either go with
     the docker-compose files from
-    [here](https://github.com/paperless-ngx/paperless-ngx/tree/master/docker/compose)
+    [here](https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose)
     or clone the repository to build the image yourself (see
     [above](#docker_build)). You can
     either replace your current paperless folder or put paperless-ngx in
@@ -708,6 +724,12 @@ below use PostgreSQL, but are applicable to MySQL/MariaDB with the
     MySQL also enforces limits on maximum lengths, but does so differently than
     PostgreSQL.  It may not be possible to migrate to MySQL due to this.
 
+!!! warning
+
+    Using mariadb version 10.4+ is recommended. Using the `utf8mb3` character set on
+    an older system may fix issues that can arise while setting up Paperless-ngx but
+    `utf8mb3` can cause issues with consumption (where `utf8mb4` does not).
+
 1.  Stop paperless, if it is running.
 
 2.  Tell paperless to use PostgreSQL:
@@ -812,14 +834,14 @@ performance immensely:
   other tasks).
 - Keep `PAPERLESS_OCR_MODE` at its default value `skip` and consider
   OCR'ing your documents before feeding them into paperless. Some
-  scanners are able to do this! You might want to even specify
-  `skip_noarchive` to skip archive file generation for already ocr'ed
-  documents entirely.
+  scanners are able to do this!
+- Set `PAPERLESS_OCR_SKIP_ARCHIVE_FILE` to `with_text` to skip archive
+  file generation for already ocr'ed documents, or `always` to skip it
+  for all documents.
 - If you want to perform OCR on the device, consider using
   `PAPERLESS_OCR_CLEAN=none`. This will speed up OCR times and use
   less memory at the expense of slightly worse OCR results.
-- If using docker, consider setting `PAPERLESS_WEBSERVER_WORKERS` to
-  1.  This will save some memory.
+- If using docker, consider setting `PAPERLESS_WEBSERVER_WORKERS` to 1. This will save some memory.
 - Consider setting `PAPERLESS_ENABLE_NLTK` to false, to disable the
   more advanced language processing, which can take more memory and
   processing time.
@@ -840,45 +862,8 @@ For details, refer to [configuration](/configuration).
 
 # Using nginx as a reverse proxy {#nginx}
 
-If you want to expose paperless to the internet, you should hide it
-behind a reverse proxy with SSL enabled.
+Please see [the wiki](https://github.com/paperless-ngx/paperless-ngx/wiki/Using-a-Reverse-Proxy-with-Paperless-ngx#nginx) for user-maintained documentation of using nginx with Paperless-ngx.
 
-In addition to the usual configuration for SSL, the following
-configuration is required for paperless to operate:
+# Enhancing security {#security}
 
-```nginx
-http {
-
-    # Adjust as required. This is the maximum size for file uploads.
-    # The default value 1M might be a little too small.
-    client_max_body_size 10M;
-
-    server {
-
-        location / {
-
-            # Adjust host and port as required.
-            proxy_pass http://localhost:8000/;
-
-            # These configuration options are required for WebSockets to work.
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-
-            proxy_redirect off;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Host $server_name;
-            add_header P3P 'CP=""'; # may not be required in all setups
-        }
-    }
-}
-```
-
-The `PAPERLESS_URL` configuration variable is also required when using a
-reverse proxy. Please refer to the [hosting and security](/configuration#hosting-and-security) docs.
-
-Also read
-[this](https://channels.readthedocs.io/en/stable/deploying.html#nginx-supervisor-ubuntu),
-towards the end of the section.
+Please see [the wiki](https://github.com/paperless-ngx/paperless-ngx/wiki/Using-Security-Tools-with-Paperless-ngx) for user-maintained documentation of how to configure security tools like Fail2ban with Paperless-ngx.

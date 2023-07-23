@@ -5,7 +5,7 @@
         <use xlink:href="assets/bootstrap-icons.svg#x"/>
       </svg>&nbsp;<ng-container i18n>Clear selection</ng-container>
     </button>
-    <button class="btn btn-sm btn-outline-primary me-4" (click)="dismissTasks()" [disabled]="tasksService.total === 0">
+    <button class="btn btn-sm btn-outline-primary me-4" (click)="dismissTasks()" *appIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }" [disabled]="tasksService.total === 0">
       <svg class="sidebaricon" fill="currentColor">
         <use xlink:href="assets/bootstrap-icons.svg#check2-all"/>
       </svg>&nbsp;<ng-container i18n>{{dismissButtonText}}</ng-container>
@@ -45,7 +45,7 @@
       </tr>
     </thead>
     <tbody>
-      <ng-container *ngFor="let task of tasks">
+      <ng-container *ngFor="let task of tasks | slice: (page-1) * pageSize : page * pageSize">
       <tr (click)="toggleSelected(task, $event); $event.stopPropagation();">
         <th>
           <div class="form-check">
@@ -75,16 +75,18 @@
         </td>
         <td scope="row">
           <div class="btn-group" role="group">
-            <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task); $event.stopPropagation();">
+            <button class="btn btn-sm btn-outline-secondary" (click)="dismissTask(task); $event.stopPropagation();" *appIfPermissions="{ action: PermissionAction.Change, type: PermissionType.PaperlessTask }">
               <svg class="sidebaricon" fill="currentColor">
                 <use xlink:href="assets/bootstrap-icons.svg#check"/>
               </svg>&nbsp;<ng-container i18n>Dismiss</ng-container>
             </button>
-            <button *ngIf="task.related_document" class="btn btn-sm btn-outline-primary" (click)="dismissAndGo(task); $event.stopPropagation();">
-              <svg class="sidebaricon" fill="currentColor">
-                <use xlink:href="assets/bootstrap-icons.svg#file-text"/>
-              </svg>&nbsp;<ng-container i18n>Open Document</ng-container>
-            </button>
+            <ng-container *appIfPermissions="{ action: PermissionAction.View, type: PermissionType.Document }">
+              <button *ngIf="task.related_document" class="btn btn-sm btn-outline-primary" (click)="dismissAndGo(task); $event.stopPropagation();">
+                <svg class="sidebaricon" fill="currentColor">
+                  <use xlink:href="assets/bootstrap-icons.svg#file-text"/>
+                </svg>&nbsp;<ng-container i18n>Open Document</ng-container>
+              </button>
+            </ng-container>
           </div>
         </td>
       </tr>
@@ -96,29 +98,34 @@
       </ng-container>
     </tbody>
   </table>
+
+  <div class="pb-3 d-sm-flex justify-content-between align-items-center">
+    <div class="pb-2 pb-sm-0" i18n *ngIf="tasks.length > 0">{tasks.length, plural, =1 {One {{this.activeTab}} task} other {{{tasks.length || 0}} total {{this.activeTab}} tasks}}</div>
+    <ngb-pagination *ngIf="tasks.length > pageSize" [(page)]="page" [pageSize]="pageSize" [collectionSize]="tasks.length" maxSize="8" size="sm"></ngb-pagination>
+  </div>
 </ng-template>
 
-<ul ngbNav #nav="ngbNav" [(activeId)]="activeTab" class="nav-tabs">
+<ul ngbNav #nav="ngbNav" [(activeId)]="activeTab" class="nav-tabs" (hidden)="duringTabChange($event)">
   <li ngbNavItem="failed">
-    <a ngbNavLink i18n>Failed&nbsp;<span *ngIf="tasksService.failedFileTasks.length > 0" class="badge bg-danger ms-1">{{tasksService.failedFileTasks.length}}</span></a>
+    <a ngbNavLink i18n>Failed<span *ngIf="tasksService.failedFileTasks.length > 0" class="badge bg-danger ms-2">{{tasksService.failedFileTasks.length}}</span></a>
     <ng-template ngbNavContent>
       <ng-container [ngTemplateOutlet]="tasksTemplate" [ngTemplateOutletContext]="{tasks:tasksService.failedFileTasks}"></ng-container>
     </ng-template>
   </li>
   <li ngbNavItem="completed">
-    <a ngbNavLink i18n>Complete&nbsp;<span *ngIf="tasksService.completedFileTasks.length > 0" class="badge bg-secondary ms-1">{{tasksService.completedFileTasks.length}}</span></a>
+    <a ngbNavLink i18n>Complete<span *ngIf="tasksService.completedFileTasks.length > 0" class="badge bg-secondary ms-2">{{tasksService.completedFileTasks.length}}</span></a>
     <ng-template ngbNavContent>
       <ng-container [ngTemplateOutlet]="tasksTemplate" [ngTemplateOutletContext]="{tasks:tasksService.completedFileTasks}"></ng-container>
     </ng-template>
   </li>
   <li ngbNavItem="started">
-    <a ngbNavLink i18n>Started&nbsp;<span *ngIf="tasksService.startedFileTasks.length > 0" class="badge bg-secondary ms-1">{{tasksService.startedFileTasks.length}}</span></a>
+    <a ngbNavLink i18n>Started<span *ngIf="tasksService.startedFileTasks.length > 0" class="badge bg-secondary ms-2">{{tasksService.startedFileTasks.length}}</span></a>
     <ng-template ngbNavContent>
       <ng-container [ngTemplateOutlet]="tasksTemplate" [ngTemplateOutletContext]="{tasks:tasksService.startedFileTasks}"></ng-container>
     </ng-template>
   </li>
   <li ngbNavItem="queued">
-    <a ngbNavLink i18n>Queued&nbsp;<span *ngIf="tasksService.queuedFileTasks.length > 0" class="badge bg-secondary ms-1">{{tasksService.queuedFileTasks.length}}</span></a>
+    <a ngbNavLink i18n>Queued<span *ngIf="tasksService.queuedFileTasks.length > 0" class="badge bg-secondary ms-2">{{tasksService.queuedFileTasks.length}}</span></a>
     <ng-template ngbNavContent>
       <ng-container [ngTemplateOutlet]="tasksTemplate" [ngTemplateOutletContext]="{tasks:tasksService.queuedFileTasks}"></ng-container>
     </ng-template>

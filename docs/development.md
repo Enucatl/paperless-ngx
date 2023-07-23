@@ -119,7 +119,9 @@ first-time setup.
 
 ## Back end development
 
-The back end is a [Django](https://www.djangoproject.com/) application. [PyCharm](https://www.jetbrains.com/de-de/pycharm/) as well as [Visual Studio Code](https://code.visualstudio.com) work well for development, but you can use whatever you want.
+The back end is a [Django](https://www.djangoproject.com/) application.
+[PyCharm](https://www.jetbrains.com/de-de/pycharm/) as well as [Visual Studio Code](https://code.visualstudio.com)
+work well for development, but you can use whatever you want.
 
 Configure the IDE to use the `src/`-folder as the base source folder.
 Configure the following launch configurations in your IDE:
@@ -138,7 +140,10 @@ $ python3 manage.py runserver & \
   celery --app paperless worker -l DEBUG
 ```
 
-You might need the front end to test your back end code. This assumes that you have AngularJS installed on your system. Go to the [Front end development](#front-end-development) section for further details. To build the front end once use this commmand:
+You might need the front end to test your back end code.
+This assumes that you have AngularJS installed on your system.
+Go to the [Front end development](#front-end-development) section for further details.
+To build the front end once use this command:
 
 ```bash
 # src-ui/
@@ -181,7 +186,7 @@ The front end is built using AngularJS. In order to get started, you need Node.j
 
 2. Make sure that it's on your path.
 
-3. Install all neccessary modules:
+3. Install all necessary modules:
 
    ```bash
    $ npm install
@@ -211,19 +216,18 @@ The front end is built using AngularJS. In order to get started, you need Node.j
   $ git ls-files -- '*.ts' | xargs pre-commit run prettier --files
   ```
 
-- Front end testing uses jest and cypress. There is currently a need
-  for significantly more front end tests. Unit tests and e2e tests,
+- Front end testing uses Jest and Playwright. Unit tests and e2e tests,
   respectively, can be run non-interactively with:
 
   ```bash
   $ ng test
-  $ npm run e2e:ci
+  $ npx playwright test
   ```
 
-  - Cypress also includes a UI which can be run with:
+  - Playwright also includes a UI which can be run with:
 
     ```bash
-    $ ./node_modules/.bin/cypress open
+    $ npx playwright test --ui
     ```
 
 - In order to build the front end and serve it as part of Django, execute:
@@ -251,7 +255,7 @@ these parts have to be translated separately.
 - The translated strings need to be placed in the
   `src-ui/src/locale/` folder.
 - In order to extract added or changed strings from the source files,
-  call `ng xi18n --ivy`.
+  call `ng extract-i18n`.
 
 Adding new languages requires adding the translated files in the
 `src-ui/src/locale/` folder and adjusting a couple files.
@@ -357,7 +361,7 @@ If you want to build the documentation locally, this is how you do it:
 
 3.  Serve the documentation. This will spin up a
     copy of the documentation at http://127.0.0.1:8000
-    that will automatically refresh everytime you change
+    that will automatically refresh every time you change
     something.
 
     ```bash
@@ -369,13 +373,10 @@ If you want to build the documentation locally, this is how you do it:
 The docker image is primarily built by the GitHub actions workflow, but
 it can be faster when developing to build and tag an image locally.
 
-To provide the build arguments automatically, build the image using the
-helper script `build-docker-image.sh`.
+Building the image works as with any image:
 
-Building the docker image from source:
-
-```bash
-./build-docker-image.sh Dockerfile -t <your-tag>
+```
+docker build --file Dockerfile --tag paperless:local --progress simple .
 ```
 
 ## Extending Paperless-ngx
@@ -393,7 +394,7 @@ responsible for:
 - Retrieving the content from the original
 - Creating a thumbnail
 - _optional:_ Retrieving a created date from the original
-- _optional:_ Creainge an archived document from the original
+- _optional:_ Creating an archived document from the original
 
 Custom parsers can be added to Paperless-ngx to support more file types. In
 order to do that, you need to write the parser itself and announce its

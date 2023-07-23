@@ -23,6 +23,8 @@ import {
   SETTINGS,
   SETTINGS_KEYS,
 } from '../data/paperless-uisettings'
+import { PaperlessUser } from '../data/paperless-user'
+import { PermissionsService } from './permissions.service'
 import { SavedViewService } from './rest/saved-view.service'
 import { ToastService } from './toast.service'
 
@@ -41,14 +43,17 @@ export interface LanguageOption {
   providedIn: 'root',
 })
 export class SettingsService {
-  private renderer: Renderer2
   protected baseUrl: string = environment.apiBaseUrl + 'ui_settings/'
 
   private settings: Object = {}
-
-  public displayName: string
+  currentUser: PaperlessUser
 
   public settingsSaved: EventEmitter<any> = new EventEmitter()
+
+  private _renderer: Renderer2
+  public get renderer(): Renderer2 {
+    return this._renderer
+  }
 
   constructor(
     rendererFactory: RendererFactory2,
@@ -58,9 +63,10 @@ export class SettingsService {
     @Inject(LOCALE_ID) private localeId: string,
     protected http: HttpClient,
     private toastService: ToastService,
-    private savedViewService: SavedViewService
+    private savedViewService: SavedViewService,
+    private permissionsService: PermissionsService
   ) {
-    this.renderer = rendererFactory.createRenderer(null, null)
+    this._renderer = rendererFactory.createRenderer(null, null)
   }
 
   // this is called by the app initializer in app.module
@@ -73,9 +79,21 @@ export class SettingsService {
         // to update lang cookie
         if (this.settings['language']?.length)
           this.setLanguage(this.settings['language'])
-        this.displayName = uisettings.display_name.trim()
+        this.currentUser = uisettings.user
+        this.permissionsService.initialize(
+          uisettings.permissions,
+          this.currentUser
+        )
       })
     )
+  }
+
+  get displayName(): string {
+    return (
+      this.currentUser.first_name ??
+      this.currentUser.username ??
+      ''
+    ).trim()
   }
 
   public updateAppearanceSettings(
@@ -88,49 +106,49 @@ export class SettingsService {
     themeColor ??= this.get(SETTINGS_KEYS.THEME_COLOR)
 
     if (darkModeUseSystem) {
-      this.renderer.addClass(this.document.body, 'color-scheme-system')
-      this.renderer.removeClass(this.document.body, 'color-scheme-dark')
+      this._renderer.addClass(this.document.body, 'color-scheme-system')
+      this._renderer.removeClass(this.document.body, 'color-scheme-dark')
     } else {
-      this.renderer.removeClass(this.document.body, 'color-scheme-system')
+      this._renderer.removeClass(this.document.body, 'color-scheme-system')
       darkModeEnabled
-        ? this.renderer.addClass(this.document.body, 'color-scheme-dark')
-        : this.renderer.removeClass(this.document.body, 'color-scheme-dark')
+        ? this._renderer.addClass(this.document.body, 'color-scheme-dark')
+        : this._renderer.removeClass(this.document.body, 'color-scheme-dark')
     }
 
     // remove these in case they were there
-    this.renderer.removeClass(this.document.body, 'primary-dark')
-    this.renderer.removeClass(this.document.body, 'primary-light')
+    this._renderer.removeClass(this.document.body, 'primary-dark')
+    this._renderer.removeClass(this.document.body, 'primary-light')
 
     if (themeColor) {
       const hsl = hexToHsl(themeColor)
       const bgBrightnessEstimate = estimateBrightnessForColor(themeColor)
 
       if (bgBrightnessEstimate == BRIGHTNESS.DARK) {
-        this.renderer.addClass(this.document.body, 'primary-dark')
-        this.renderer.removeClass(this.document.body, 'primary-light')
+        this._renderer.addClass(this.document.body, 'primary-dark')
+        this._renderer.removeClass(this.document.body, 'primary-light')
       } else {
-        this.renderer.addClass(this.document.body, 'primary-light')
-        this.renderer.removeClass(this.document.body, 'primary-dark')
+        this._renderer.addClass(this.document.body, 'primary-light')
+        this._renderer.removeClass(this.document.body, 'primary-dark')
       }
-      this.renderer.setStyle(
+      this._renderer.setStyle(
         document.body,
         '--pngx-primary',
         `${+hsl.h * 360},${hsl.s * 100}%`,
         RendererStyleFlags2.DashCase
       )
-      this.renderer.setStyle(
+      this._renderer.setStyle(
         document.body,
         '--pngx-primary-lightness',
         `${hsl.l * 100}%`,
         RendererStyleFlags2.DashCase
       )
     } else {
-      this.renderer.removeStyle(
+      this._renderer.removeStyle(
         document.body,
         '--pngx-primary',
         RendererStyleFlags2.DashCase
       )
-      this.renderer.removeStyle(
+      this._renderer.removeStyle(
         document.body,
         '--pngx-primary-lightness',
         RendererStyleFlags2.DashCase
@@ -157,6 +175,12 @@ export class SettingsService {
         name: $localize`Belarusian`,
         englishName: 'Belarusian',
         dateInputFormat: 'dd.mm.yyyy',
+      },
+      {
+        code: 'ca-es',
+        name: $localize`Catalan`,
+        englishName: 'Catalan',
+        dateInputFormat: 'dd/mm/yyyy',
       },
       {
         code: 'cs-cz',
@@ -187,6 +211,12 @@ export class SettingsService {
         name: $localize`Spanish`,
         englishName: 'Spanish',
         dateInputFormat: 'dd/mm/yyyy',
+      },
+      {
+        code: 'fi-fi',
+        name: $localize`Finnish`,
+        englishName: 'Finnish',
+        dateInputFormat: 'dd.mm.yyyy',
       },
       {
         code: 'fr-fr',
@@ -458,7 +488,22 @@ export class SettingsService {
   offerTour(): boolean {
     return (
       !this.savedViewService.loading &&
-      this.savedViewService.dashboardViews.length == 0
+      this.savedViewService.dashboardViews.length == 0 &&
+      !this.get(SETTINGS_KEYS.TOUR_COMPLETE)
     )
+  }
+
+  completeTour() {
+    const tourCompleted = this.get(SETTINGS_KEYS.TOUR_COMPLETE)
+    if (!tourCompleted) {
+      this.set(SETTINGS_KEYS.TOUR_COMPLETE, true)
+      this.storeSettings()
+        .pipe(first())
+        .subscribe(() => {
+          this.toastService.showInfo(
+            $localize`You can restart the tour from the settings page.`
+          )
+        })
+    }
   }
 }

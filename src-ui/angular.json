@@ -18,11 +18,13 @@
         "locales": {
           "ar-AR": "src/locale/messages.ar_AR.xlf",
           "be-BY": "src/locale/messages.be_BY.xlf",
+          "ca-ES": "src/locale/messages.ca_ES.xlf",
           "cs-CZ": "src/locale/messages.cs_CZ.xlf",
           "da-DK": "src/locale/messages.da_DK.xlf",
           "de-DE": "src/locale/messages.de_DE.xlf",
           "en-GB": "src/locale/messages.en_GB.xlf",
           "es-ES": "src/locale/messages.es_ES.xlf",
+          "fi-FI": "src/locale/messages.fi_FI.xlf",
           "fr-FR": "src/locale/messages.fr_FR.xlf",
           "it-IT": "src/locale/messages.it_IT.xlf",
           "lb-LU": "src/locale/messages.lb_LU.xlf",
@@ -145,37 +147,6 @@
             "scripts": []
           }
         },
-        "e2e": {
-          "builder": "@cypress/schematic:cypress",
-          "options": {
-            "devServerTarget": "paperless-ui:serve",
-            "watch": true,
-            "headless": false
-          },
-          "configurations": {
-            "production": {
-              "devServerTarget": "paperless-ui:serve:production"
-            }
-          }
-        },
-        "cypress-run": {
-          "builder": "@cypress/schematic:cypress",
-          "options": {
-            "devServerTarget": "paperless-ui:serve"
-          },
-          "configurations": {
-            "production": {
-              "devServerTarget": "paperless-ui:serve:production"
-            }
-          }
-        },
-        "cypress-open": {
-          "builder": "@cypress/schematic:cypress",
-          "options": {
-            "watch": true,
-            "headless": false
-          }
-        },
         "lint": {
           "builder": "@angular-eslint/builder:lint",
           "options": {
@@ -192,7 +163,8 @@
   "cli": {
     "schematicCollections": [
       "@angular-eslint/schematics"
-    ]
+    ],
+    "analytics": false
   },
   "schematics": {
     "@angular-eslint/schematics:application": {

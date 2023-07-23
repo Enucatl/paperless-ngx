@@ -41,7 +41,7 @@ services:
       - traefik_proxy
 
   db:
-    image: docker.io/library/postgres:13
+    image: docker.io/library/postgres:15
     restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -60,6 +60,11 @@ services:
       - broker
       - gotenberg
       - tika
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-S", "--max-time", "2", "http://localhost:8000"]
+      interval: 120s
+      timeout: 10s
+      retries: 5
     volumes:
       - data:/usr/src/paperless/data
       - media:/usr/src/paperless/media
@@ -94,7 +99,7 @@ services:
       - "traefik.http.services.paperless.loadbalancer.server.port=8000"
 
   gotenberg:
-    image: docker.io/gotenberg/gotenberg:7.6
+    image: docker.io/gotenberg/gotenberg:7.8
     restart: unless-stopped
     # The gotenberg chromium route is used to convert .eml files. We do not
     # want to allow external content like tracking pixels or even javascript.

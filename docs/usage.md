@@ -60,8 +60,8 @@ following operations on your documents:
 
     This process can be configured to fit your needs. If you don't want
     paperless to create archived versions for digital documents, you can
-    configure that by configuring `PAPERLESS_OCR_MODE=skip_noarchive`.
-    Please read the
+    configure that by configuring
+    `PAPERLESS_OCR_SKIP_ARCHIVE_FILE=with_text`. Please read the
     [relevant section in the documentation](/configuration#ocr).
 
 !!! note
@@ -69,7 +69,9 @@ following operations on your documents:
     No matter which options you choose, Paperless will always store the
     original document that it found in the consumption directory or in the
     mail and will never overwrite that document. Archived versions are
-    stored alongside the original versions.
+    stored alongside the original versions. Any files found in the
+    consumption directory will stored inside the Paperless-ngx file
+    structure and will not be retained in the consumption directory.
 
 ### The consumption directory
 
@@ -77,7 +79,9 @@ The primary method of getting documents into your database is by putting
 them in the consumption directory. The consumer waits patiently, looking
 for new additions to this directory. When it finds them,
 the consumer goes about the process of parsing them with the OCR,
-indexing what it finds, and storing it in the media directory.
+indexing what it finds, and storing it in the media directory. You should
+think of this folder as a temporary location, as files will be re-created
+inside Paperless-ngx and removed from the consumption folder.
 
 Getting stuff into this directory is up to you. If you're running
 Paperless on your local computer, you might just want to drag and drop
@@ -87,6 +91,15 @@ setup some sort of service to accept the files from the scanner.
 Typically, you're looking at an FTP server like
 [Proftpd](http://www.proftpd.org/) or a Windows folder share with
 [Samba](https://www.samba.org/).
+
+!!! warning
+
+    Files found in the consumption directory that are consumed will be
+    removed from the consumption directory and stored inside the
+    Paperless-ngx file structure using any settings / storage paths
+    you have specified. This action is performed as safely as possible
+    but this means it is expected that files in the consumption
+    directory will no longer exist (there) after being consumed.
 
 ### Web UI Upload
 
@@ -201,6 +214,41 @@ configured via `PAPERLESS_EMAIL_TASK_CRON` (see [software tweaks](/configuration
 
 You can also submit a document using the REST API, see [POSTing documents](/api#file-uploads)
 for details.
+
+## Permissions
+
+As of version 1.14.0 Paperless-ngx added core support for user / group permissions. Permissions is
+based around 'global' permissions as well as 'object-level' permissions. Global permissions designate
+which parts of the application a user can access (e.g. Documents, Tags, Settings) and object-level
+determine which objects are visible or editable. All objects have an 'owner' and 'view' and 'edit'
+permissions which can be granted to other users or groups.
+
+Permissions uses the built-in user model of the backend framework, Django.
+
+!!! note
+
+    After migration to version 1.14.0 all existing documents, tags etc. will have no explicit owner
+    set which means they will be visible / editable by all users. Once an object has an owner set,
+    only the owner can explicitly grant / revoke permissions.
+
+!!! note
+
+    When first migrating to permissions it is recommended to use a 'superuser' account (which
+    would usually have been setup during installation) to ensure you have full permissions.
+
+    Note that superusers have access to all objects.
+
+Permissions can be set using the new "Permissions" tab when editing documents, or bulk-applied
+in the UI by selecting documents and choosing the "Permissions" button. Owner can also optionally
+be set for documents uploaded via the API. Documents consumed via the consumption dir currently
+do not have an owner set.
+
+### Users and Groups
+
+Paperless-ngx versions after 1.14.0 allow creating and editing users and groups via the 'frontend' UI.
+These can be found under Settings > Users & Groups, assuming the user has access. If a user is designated
+as a member of a group those permissions will be inherited and this is reflected in the UI. Explicit
+permissions can be granted to limit access to certain parts of the UI (and corresponding API endpoints).
 
 ## Best practices {#basic-searching}
 

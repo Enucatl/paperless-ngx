@@ -14,12 +14,15 @@ The API provides 7 main endpoints:
 - `/api/document_types/`: Full CRUD support.
 - `/api/logs/`: Read-Only.
 - `/api/tags/`: Full CRUD support.
+- `/api/tasks/`: Read-only.
 - `/api/mail_accounts/`: Full CRUD support.
 - `/api/mail_rules/`: Full CRUD support.
+- `/api/users/`: Full CRUD support.
+- `/api/groups/`: Full CRUD support.
 
 All of these endpoints except for the logging endpoint allow you to
-fetch, edit and delete individual objects by appending their primary key
-to the path, for example `/api/documents/454/`.
+fetch (and edit and delete where appropriate) individual objects by
+appending their primary key to the path, e.g. `/api/documents/454/`.
 
 The objects served by the document endpoint contain the following
 fields:
@@ -44,6 +47,8 @@ fields:
   Read-only.
 - `archived_file_name`: Verbose filename of the archived document.
   Read-only. Null if no archived document is available.
+- `set_permissions`: Allows setting document permissions. Optional,
+  write-only. See [below](#permissions).
 
 ## Downloading documents
 
@@ -254,11 +259,51 @@ The endpoint supports the following optional form fields:
 - `document_type`: Similar to correspondent.
 - `tags`: Similar to correspondent. Specify this multiple times to
   have multiple tags added to the document.
+- `archive_serial_number`: An optional archive serial number to set.
 
-The endpoint will immediately return "OK" if the document consumption
-process was started successfully. No additional status information about
-the consumption process itself is available, since that happens in a
-different process.
+The endpoint will immediately return HTTP 200 if the document consumption
+process was started successfully, with the UUID of the consumption task
+as the data. No additional status information about the consumption process
+itself is available immediately, since that happens in a different process.
+However, querying the tasks endpoint with the returned UUID e.g.
+`/api/tasks/?task_id={uuid}` will provide information on the state of the
+consumption including the ID of a created document if consumption succeeded.
+
+## Permissions
+
+All objects (documents, tags, etc.) allow setting object-level permissions
+with an optional `set_permissions` parameter which is of the form:
+
+```
+{
+  "owner": user_id,
+  "view": {
+      "users": [...],
+      "groups": [...],
+  },
+  "change": {
+      "users": [...],
+      "groups": [...],
+  },
+}
+```
+
+!!! note
+
+    Arrays should contain user or group ID numbers.
+
+If this parameter is supplied the object's permissions will be overwritten,
+assuming the authenticated user has permission to do so (the user must be
+the object owner or a superuser).
+
+### Retrieving full permissions
+
+By default, the API will return a truncated version of object-level
+permissions, returning `user_can_change` indicating whether the current user
+can edit the object (either because they are the object owner or have permissions
+granted). You can pass the parameter `full_perms=true` to API calls to view the
+full permissions of objects in a format that mirrors the `set_permissions`
+parameter above.
 
 ## API Versioning
 

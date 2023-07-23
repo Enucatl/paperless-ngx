@@ -5,17 +5,24 @@ import { Subject, first } from 'rxjs'
 import { PaperlessTask } from 'src/app/data/paperless-task'
 import { TasksService } from 'src/app/services/tasks.service'
 import { ConfirmDialogComponent } from '../../common/confirm-dialog/confirm-dialog.component'
+import { ComponentWithPermissions } from '../../with-permissions/with-permissions.component'
 
 @Component({
   selector: 'app-tasks',
   templateUrl: './tasks.component.html',
   styleUrls: ['./tasks.component.scss'],
 })
-export class TasksComponent implements OnInit, OnDestroy {
+export class TasksComponent
+  extends ComponentWithPermissions
+  implements OnInit, OnDestroy
+{
   public activeTab: string
   public selectedTasks: Set<number> = new Set()
   private unsubscribeNotifer = new Subject()
   public expandedTask: number
+
+  public pageSize: number = 25
+  public page: number = 1
 
   get dismissButtonText(): string {
     return this.selectedTasks.size > 0
@@ -27,7 +34,9 @@ export class TasksComponent implements OnInit, OnDestroy {
     public tasksService: TasksService,
     private modalService: NgbModal,
     private readonly router: Router
-  ) {}
+  ) {
+    super()
+  }
 
   ngOnInit() {
     this.tasksService.reload()
@@ -42,8 +51,8 @@ export class TasksComponent implements OnInit, OnDestroy {
   }
 
   dismissTasks(task: PaperlessTask = undefined) {
-    let tasks = task ? new Set([task.id]) : this.selectedTasks
-    if (!task && this.selectedTasks.size == 0)
+    let tasks = task ? new Set([task.id]) : new Set(this.selectedTasks.values())
+    if (!task && tasks.size == 0)
       tasks = new Set(this.tasksService.allFileTasks.map((t) => t.id))
     if (tasks.size > 1) {
       let modal = this.modalService.open(ConfirmDialogComponent, {
@@ -82,7 +91,7 @@ export class TasksComponent implements OnInit, OnDestroy {
   }
 
   get currentTasks(): PaperlessTask[] {
-    let tasks: PaperlessTask[]
+    let tasks: PaperlessTask[] = []
     switch (this.activeTab) {
       case 'queued':
         tasks = this.tasksService.queuedFileTasks
@@ -95,8 +104,6 @@ export class TasksComponent implements OnInit, OnDestroy {
         break
       case 'failed':
         tasks = this.tasksService.failedFileTasks
-        break
-      default:
         break
     }
     return tasks
@@ -112,5 +119,9 @@ export class TasksComponent implements OnInit, OnDestroy {
 
   clearSelection() {
     this.selectedTasks.clear()
+  }
+
+  duringTabChange(navID: number) {
+    this.page = 1
   }
 }

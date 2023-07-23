@@ -1,18 +1,22 @@
 import { Injectable } from '@angular/core'
 import { ParamMap, Router } from '@angular/router'
-import { Observable } from 'rxjs'
+import { Observable, first } from 'rxjs'
+import { FilterRule } from '../data/filter-rule'
 import {
   filterRulesDiffer,
   cloneFilterRules,
-  FilterRule,
   isFullTextFilterRule,
-} from '../data/filter-rule'
+} from '../utils/filter-rules'
 import { PaperlessDocument } from '../data/paperless-document'
 import { PaperlessSavedView } from '../data/paperless-saved-view'
 import { SETTINGS_KEYS } from '../data/paperless-uisettings'
 import { DOCUMENT_LIST_SERVICE } from '../data/storage-keys'
 import { paramsFromViewState, paramsToViewState } from '../utils/query-params'
-import { DocumentService, DOCUMENT_SORT_FIELDS } from './rest/document.service'
+import {
+  DocumentService,
+  DOCUMENT_SORT_FIELDS,
+  SelectionData,
+} from './rest/document.service'
 import { SettingsService } from './settings.service'
 
 /**
@@ -73,6 +77,8 @@ export class DocumentListViewService {
 
   rangeSelectionAnchorIndex: number
   lastRangeSelectionToIndex: number
+
+  selectionData?: SelectionData
 
   currentPageSize: number = this.settings.get(SETTINGS_KEYS.DOCUMENT_LIST_SIZE)
 
@@ -222,6 +228,19 @@ export class DocumentListViewService {
           this.isReloading = false
           activeListViewState.collectionSize = result.count
           activeListViewState.documents = result.results
+
+          this.documentService
+            .getSelectionData(result.all)
+            .pipe(first())
+            .subscribe({
+              next: (selectionData) => {
+                this.selectionData = selectionData
+              },
+              error: () => {
+                this.selectionData = null
+              },
+            })
+
           if (updateQueryParams && !this._activeSavedViewId) {
             let base = ['/documents']
             this.router.navigate(base, {
@@ -247,6 +266,7 @@ export class DocumentListViewService {
             activeListViewState.currentPage = 1
             this.reload()
           } else {
+            this.selectionData = null
             let errorMessage
             if (
               typeof error.error !== 'string' &&
@@ -354,7 +374,9 @@ export class DocumentListViewService {
   }
 
   quickFilter(filterRules: FilterRule[]) {
+    this._activeSavedViewId = null
     this.filterRules = filterRules
+    this.router.navigate(['documents'])
   }
 
   getLastPage(): number {

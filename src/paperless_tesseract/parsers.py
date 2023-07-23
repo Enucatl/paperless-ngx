@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Optional
 
 from django.conf import settings
-from documents.parsers import DocumentParser
-from documents.parsers import make_thumbnail_from_pdf
-from documents.parsers import ParseError
 from PIL import Image
+
+from documents.parsers import DocumentParser
+from documents.parsers import ParseError
+from documents.parsers import make_thumbnail_from_pdf
 
 
 class NoTextFoundException(Exception):
@@ -30,7 +31,6 @@ class RasterisedDocumentParser(DocumentParser):
     logging_name = "paperless.parsing.tesseract"
 
     def extract_metadata(self, document_path, mime_type):
-
         result = []
         if mime_type == "application/pdf":
             import pikepdf
@@ -54,9 +54,8 @@ class RasterisedDocumentParser(DocumentParser):
                         },
                     )
                 except Exception as e:
-                    self.log(
-                        "warning",
-                        f"Error while reading metadata {key}: {value}. Error: " f"{e}",
+                    self.log.warning(
+                        f"Error while reading metadata {key}: {value}. Error: {e}",
                     )
         return result
 
@@ -98,7 +97,7 @@ class RasterisedDocumentParser(DocumentParser):
                 x, y = im.info["dpi"]
                 return round(x)
         except Exception as e:
-            self.log("warning", f"Error while getting DPI from image {image}: {e}")
+            self.log.warning(f"Error while getting DPI from image {image}: {e}")
             return None
 
     def calculate_a4_dpi(self, image):
@@ -107,11 +106,11 @@ class RasterisedDocumentParser(DocumentParser):
                 width, height = im.size
                 # divide image width by A4 width (210mm) in inches.
                 dpi = int(width / (21 / 2.54))
-                self.log("debug", f"Estimated DPI {dpi} based on image width {width}")
+                self.log.debug(f"Estimated DPI {dpi} based on image width {width}")
                 return dpi
 
         except Exception as e:
-            self.log("warning", f"Error while calculating DPI for image {image}: {e}")
+            self.log.warning(f"Error while calculating DPI for image {image}: {e}")
             return None
 
     def extract_text(self, sidecar_file: Optional[Path], pdf_file: Path):
@@ -122,16 +121,15 @@ class RasterisedDocumentParser(DocumentParser):
             and os.path.isfile(sidecar_file)
             and settings.OCR_MODE != "redo"
         ):
-            with open(sidecar_file) as f:
-                text = f.read()
+            text = self.read_file_handle_unicode_errors(sidecar_file)
 
             if "[OCR skipped on page" not in text:
                 # This happens when there's already text in the input file.
                 # The sidecar file will only contain text for OCR'ed pages.
-                self.log("debug", "Using text from sidecar file")
+                self.log.debug("Using text from sidecar file")
                 return post_process_text(text)
             else:
-                self.log("debug", "Incomplete sidecar file: discarding.")
+                self.log.debug("Incomplete sidecar file: discarding.")
 
         # no success with the sidecar file, try PDF
 
@@ -155,16 +153,14 @@ class RasterisedDocumentParser(DocumentParser):
                         tmp.name,
                     ],
                 )
-                text = tmp.read()
+                text = self.read_file_handle_unicode_errors(Path(tmp.name))
 
             return post_process_text(text)
 
         except Exception:
-            # TODO catch all for various issues with PDFminer.six.
-            #  If PDFminer fails, fall back to OCR.
-            self.log(
-                "warning",
-                "Error while getting text from PDF document with " "pdfminer.six",
+            #  If pdftotext fails, fall back to OCR.
+            self.log.warning(
+                "Error while getting text from PDF document with pdftotext",
                 exc_info=True,
             )
             # probably not a PDF file.
@@ -229,15 +225,14 @@ class RasterisedDocumentParser(DocumentParser):
             a4_dpi = self.calculate_a4_dpi(input_file)
 
             if self.has_alpha(input_file):
-                self.log(
-                    "info",
+                self.log.info(
                     f"Removing alpha layer from {input_file} "
                     "for compatibility with img2pdf",
                 )
                 self.remove_alpha(input_file)
 
             if dpi:
-                self.log("debug", f"Detected DPI for image {input_file}: {dpi}")
+                self.log.debug(f"Detected DPI for image {input_file}: {dpi}")
                 ocrmypdf_args["image_dpi"] = dpi
             elif settings.OCR_IMAGE_DPI:
                 ocrmypdf_args["image_dpi"] = settings.OCR_IMAGE_DPI
@@ -255,8 +250,7 @@ class RasterisedDocumentParser(DocumentParser):
                 user_args = json.loads(settings.OCR_USER_ARGS)
                 ocrmypdf_args = {**ocrmypdf_args, **user_args}
             except Exception as e:
-                self.log(
-                    "warning",
+                self.log.warning(
                     f"There is an issue with PAPERLESS_OCR_USER_ARGS, so "
                     f"they will not be used. Error: {e}",
                 )
@@ -265,16 +259,13 @@ class RasterisedDocumentParser(DocumentParser):
             # Convert pixels to mega-pixels and provide to ocrmypdf
             max_pixels_mpixels = settings.OCR_MAX_IMAGE_PIXELS / 1_000_000.0
             if max_pixels_mpixels > 0:
-
-                self.log(
-                    "debug",
+                self.log.debug(
                     f"Calculated {max_pixels_mpixels} megapixels for OCR",
                 )
 
                 ocrmypdf_args["max_image_mpixels"] = max_pixels_mpixels
             else:
-                self.log(
-                    "warning",
+                self.log.warning(
                     "There is an issue with PAPERLESS_OCR_MAX_IMAGE_PIXELS, "
                     "this value must be at least 1 megapixel if set",
                 )
@@ -284,18 +275,25 @@ class RasterisedDocumentParser(DocumentParser):
     def parse(self, document_path: Path, mime_type, file_name=None):
         # This forces tesseract to use one core per page.
         os.environ["OMP_THREAD_LIMIT"] = "1"
+        VALID_TEXT_LENGTH = 50
 
         if mime_type == "application/pdf":
             text_original = self.extract_text(None, document_path)
-            original_has_text = text_original is not None and len(text_original) > 50
+            original_has_text = (
+                text_original is not None and len(text_original) > VALID_TEXT_LENGTH
+            )
         else:
             text_original = None
             original_has_text = False
 
         # If the original has text, and the user doesn't want an archive,
         # we're done here
-        if settings.OCR_MODE == "skip_noarchive" and original_has_text:
-            self.log("debug", "Document has text, skipping OCRmyPDF entirely.")
+        skip_archive_for_text = (
+            settings.OCR_MODE == "skip_noarchive"
+            or settings.OCR_SKIP_ARCHIVE_FILE in ["with_text", "always"]
+        )
+        if skip_archive_for_text and original_has_text:
+            self.log.debug("Document has text, skipping OCRmyPDF entirely.")
             self.text = text_original
             return
 
@@ -304,7 +302,8 @@ class RasterisedDocumentParser(DocumentParser):
         # text located via OCR
 
         import ocrmypdf
-        from ocrmypdf import InputFileError, EncryptedPdfError
+        from ocrmypdf import EncryptedPdfError
+        from ocrmypdf import InputFileError
 
         archive_path = Path(os.path.join(self.tempdir, "archive.pdf"))
         sidecar_file = Path(os.path.join(self.tempdir, "sidecar.txt"))
@@ -317,27 +316,26 @@ class RasterisedDocumentParser(DocumentParser):
         )
 
         try:
-            self.log("debug", f"Calling OCRmyPDF with args: {args}")
+            self.log.debug(f"Calling OCRmyPDF with args: {args}")
             ocrmypdf.ocr(**args)
 
-            self.archive_path = archive_path
+            if settings.OCR_SKIP_ARCHIVE_FILE != "always":
+                self.archive_path = archive_path
 
             self.text = self.extract_text(sidecar_file, archive_path)
 
             if not self.text:
                 raise NoTextFoundException("No text was found in the original document")
         except EncryptedPdfError:
-            self.log(
-                "warning",
+            self.log.warning(
                 "This file is encrypted, OCR is impossible. Using "
                 "any text present in the original file.",
             )
             if original_has_text:
                 self.text = text_original
         except (NoTextFoundException, InputFileError) as e:
-            self.log(
-                "warning",
-                f"Encountered an error while running OCR: {str(e)}. "
+            self.log.warning(
+                f"Encountered an error while running OCR: {e!s}. "
                 f"Attempting force OCR to get the text.",
             )
 
@@ -359,7 +357,7 @@ class RasterisedDocumentParser(DocumentParser):
             )
 
             try:
-                self.log("debug", f"Fallback: Calling OCRmyPDF with args: {args}")
+                self.log.debug(f"Fallback: Calling OCRmyPDF with args: {args}")
                 ocrmypdf.ocr(**args)
 
                 # Don't return the archived file here, since this file
@@ -372,11 +370,11 @@ class RasterisedDocumentParser(DocumentParser):
 
             except Exception as e:
                 # If this fails, we have a serious issue at hand.
-                raise ParseError(f"{e.__class__.__name__}: {str(e)}") from e
+                raise ParseError(f"{e.__class__.__name__}: {e!s}") from e
 
         except Exception as e:
             # Anything else is probably serious.
-            raise ParseError(f"{e.__class__.__name__}: {str(e)}") from e
+            raise ParseError(f"{e.__class__.__name__}: {e!s}") from e
 
         # As a last resort, if we still don't have any text for any reason,
         # try to extract the text from the original document.
@@ -384,8 +382,7 @@ class RasterisedDocumentParser(DocumentParser):
             if original_has_text:
                 self.text = text_original
             else:
-                self.log(
-                    "warning",
+                self.log.warning(
                     f"No text was found in {document_path}, the content will "
                     f"be empty.",
                 )

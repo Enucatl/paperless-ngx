@@ -40,7 +40,7 @@ categories:
     labels:
       - 'frontend'
       - 'backend'
-    collapse-after: 0
+    collapse-after: 1
 include-labels:
   - 'enhancement'
   - 'bug'
@@ -54,6 +54,8 @@ include-labels:
   - 'ci-cd'
   - 'breaking-change'
   - 'notable'
+exclude-labels:
+  - 'skip-changelog'
 category-template: '### $TITLE'
 change-template: '- $TITLE @$AUTHOR ([#$NUMBER]($URL))'
 change-title-escapes: '\<*_&#@'

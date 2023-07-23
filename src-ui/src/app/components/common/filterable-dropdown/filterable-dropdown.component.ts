@@ -11,18 +11,33 @@ import { NgbDropdown } from '@ng-bootstrap/ng-bootstrap'
 import { ToggleableItemState } from './toggleable-dropdown-button/toggleable-dropdown-button.component'
 import { MatchingModel } from 'src/app/data/matching-model'
 import { Subject } from 'rxjs'
+import { SelectionDataItem } from 'src/app/services/rest/document.service'
+import { ObjectWithPermissions } from 'src/app/data/object-with-permissions'
 
 export interface ChangedItems {
   itemsToAdd: MatchingModel[]
   itemsToRemove: MatchingModel[]
 }
 
+export enum LogicalOperator {
+  And = 'and',
+  Or = 'or',
+}
+
+export enum Intersection {
+  Include = 'include',
+  Exclude = 'exclude',
+}
+
 export class FilterableDropdownSelectionModel {
   changed = new Subject<FilterableDropdownSelectionModel>()
 
-  multiple = false
-  private _logicalOperator = 'and'
-  temporaryLogicalOperator = this._logicalOperator
+  manyToOne = false
+  singleSelect = false
+  private _logicalOperator: LogicalOperator = LogicalOperator.And
+  temporaryLogicalOperator: LogicalOperator = this._logicalOperator
+  private _intersection: Intersection = Intersection.Include
+  temporaryIntersection: Intersection = this._intersection
 
   items: MatchingModel[] = []
 
@@ -81,24 +96,39 @@ export class FilterableDropdownSelectionModel {
   toggle(id: number, fireEvent = true) {
     let state = this.temporarySelectionStates.get(id)
     if (
-      state == null ||
+      state == undefined ||
       (state != ToggleableItemState.Selected &&
         state != ToggleableItemState.Excluded)
     ) {
-      this.temporarySelectionStates.set(id, ToggleableItemState.Selected)
+      if (this.manyToOne || this.singleSelect) {
+        this.temporarySelectionStates.set(id, ToggleableItemState.Selected)
+
+        if (this.singleSelect) {
+          for (let key of this.temporarySelectionStates.keys()) {
+            if (key != id) {
+              this.temporarySelectionStates.delete(key)
+            }
+          }
+        }
+      } else {
+        let newState =
+          this.intersection == Intersection.Include
+            ? ToggleableItemState.Selected
+            : ToggleableItemState.Excluded
+        if (!id) newState = ToggleableItemState.Selected
+        if (
+          state == ToggleableItemState.Excluded &&
+          this.intersection == Intersection.Exclude
+        ) {
+          newState = ToggleableItemState.NotSelected
+        }
+        this.temporarySelectionStates.set(id, newState)
+      }
     } else if (
       state == ToggleableItemState.Selected ||
       state == ToggleableItemState.Excluded
     ) {
       this.temporarySelectionStates.delete(id)
-    }
-
-    if (!this.multiple) {
-      for (let key of this.temporarySelectionStates.keys()) {
-        if (key != id) {
-          this.temporarySelectionStates.delete(key)
-        }
-      }
     }
 
     if (!id) {
@@ -118,19 +148,36 @@ export class FilterableDropdownSelectionModel {
 
   exclude(id: number, fireEvent: boolean = true) {
     let state = this.temporarySelectionStates.get(id)
-    if (state == null || state != ToggleableItemState.Excluded) {
-      this.temporarySelectionStates.set(id, ToggleableItemState.Excluded)
-      this.temporaryLogicalOperator = this._logicalOperator = 'and'
-    } else if (state == ToggleableItemState.Excluded) {
-      this.temporarySelectionStates.delete(id)
-    }
+    if (id && (state == null || state != ToggleableItemState.Excluded)) {
+      this.temporaryLogicalOperator = this._logicalOperator = this.manyToOne
+        ? LogicalOperator.And
+        : LogicalOperator.Or
 
-    if (!this.multiple) {
-      for (let key of this.temporarySelectionStates.keys()) {
-        if (key != id) {
-          this.temporarySelectionStates.delete(key)
+      if (this.manyToOne || this.singleSelect) {
+        this.temporarySelectionStates.set(id, ToggleableItemState.Excluded)
+
+        if (this.singleSelect) {
+          for (let key of this.temporarySelectionStates.keys()) {
+            if (key != id) {
+              this.temporarySelectionStates.delete(key)
+            }
+          }
         }
+      } else {
+        let newState =
+          this.intersection == Intersection.Include
+            ? ToggleableItemState.Selected
+            : ToggleableItemState.Excluded
+        if (
+          state == ToggleableItemState.Selected &&
+          this.intersection == Intersection.Include
+        ) {
+          newState = ToggleableItemState.NotSelected
+        }
+        this.temporarySelectionStates.set(id, newState)
       }
+    } else if (!id || state == ToggleableItemState.Excluded) {
+      this.temporarySelectionStates.delete(id)
     }
 
     if (fireEvent) {
@@ -142,15 +189,35 @@ export class FilterableDropdownSelectionModel {
     return this.selectionStates.get(id) || ToggleableItemState.NotSelected
   }
 
-  get logicalOperator(): string {
+  get logicalOperator(): LogicalOperator {
     return this.temporaryLogicalOperator
   }
 
-  set logicalOperator(operator: string) {
+  set logicalOperator(operator: LogicalOperator) {
     this.temporaryLogicalOperator = operator
   }
 
   toggleOperator() {
+    this.changed.next(this)
+  }
+
+  get intersection(): Intersection {
+    return this.temporaryIntersection
+  }
+
+  set intersection(intersection: Intersection) {
+    this.temporaryIntersection = intersection
+  }
+
+  toggleIntersection() {
+    if (this.temporarySelectionStates.size === 0) return
+    let newState =
+      this.intersection == Intersection.Include
+        ? ToggleableItemState.Selected
+        : ToggleableItemState.Excluded
+    this.temporarySelectionStates.forEach((state, key) => {
+      this.temporarySelectionStates.set(key, newState)
+    })
     this.changed.next(this)
   }
 
@@ -170,7 +237,8 @@ export class FilterableDropdownSelectionModel {
 
   clear(fireEvent = true) {
     this.temporarySelectionStates.clear()
-    this.temporaryLogicalOperator = this._logicalOperator = 'and'
+    this.temporaryLogicalOperator = this._logicalOperator = LogicalOperator.And
+    this.temporaryIntersection = this._intersection = Intersection.Include
     if (fireEvent) {
       this.changed.next(this)
     }
@@ -192,6 +260,8 @@ export class FilterableDropdownSelectionModel {
     ) {
       return true
     } else if (this.temporaryLogicalOperator !== this._logicalOperator) {
+      return true
+    } else if (this.temporaryIntersection !== this._intersection) {
       return true
     } else {
       return false
@@ -216,13 +286,18 @@ export class FilterableDropdownSelectionModel {
       this.selectionStates.set(key, value)
     })
     this._logicalOperator = this.temporaryLogicalOperator
+    this._intersection = this.temporaryIntersection
   }
 
-  reset() {
+  reset(complete: boolean = false) {
     this.temporarySelectionStates.clear()
-    this.selectionStates.forEach((value, key) => {
-      this.temporarySelectionStates.set(key, value)
-    })
+    if (complete) {
+      this.selectionStates.clear()
+    } else {
+      this.selectionStates.forEach((value, key) => {
+        this.temporarySelectionStates.set(key, value)
+      })
+    }
   }
 
   diff(): ChangedItems {
@@ -250,6 +325,7 @@ export class FilterableDropdownSelectionModel {
 export class FilterableDropdownComponent {
   @ViewChild('listFilterTextInput') listFilterTextInput: ElementRef
   @ViewChild('dropdown') dropdown: NgbDropdown
+  @ViewChild('buttonItems') buttonItems: ElementRef
 
   filterText: string
 
@@ -268,14 +344,16 @@ export class FilterableDropdownComponent {
     return this._selectionModel.items
   }
 
-  _selectionModel = new FilterableDropdownSelectionModel()
+  _selectionModel: FilterableDropdownSelectionModel =
+    new FilterableDropdownSelectionModel()
 
   @Input()
   set selectionModel(model: FilterableDropdownSelectionModel) {
     if (this.selectionModel) {
       this.selectionModel.changed.complete()
       model.items = this.selectionModel.items
-      model.multiple = this.selectionModel.multiple
+      model.manyToOne = this.selectionModel.manyToOne
+      model.singleSelect = this.editing && !this.selectionModel.manyToOne
     }
     model.changed.subscribe((updatedModel) => {
       this.selectionModelChange.next(updatedModel)
@@ -291,12 +369,12 @@ export class FilterableDropdownComponent {
   selectionModelChange = new EventEmitter<FilterableDropdownSelectionModel>()
 
   @Input()
-  set multiple(value: boolean) {
-    this.selectionModel.multiple = value
+  set manyToOne(manyToOne: boolean) {
+    this.selectionModel.manyToOne = manyToOne
   }
 
-  get multiple() {
-    return this.selectionModel.multiple
+  get manyToOne() {
+    return this.selectionModel.manyToOne
   }
 
   @Input()
@@ -317,23 +395,34 @@ export class FilterableDropdownComponent {
   @Input()
   applyOnClose = false
 
+  @Input()
+  disabled = false
+
   @Output()
   apply = new EventEmitter<ChangedItems>()
 
   @Output()
   opened = new EventEmitter()
 
-  get operatorToggleEnabled(): boolean {
-    return (
-      this.selectionModel.selectionSize() > 1 &&
-      this.selectionModel.getExcludedItems().length == 0
-    )
+  get modifierToggleEnabled(): boolean {
+    return this.manyToOne
+      ? this.selectionModel.selectionSize() > 1 &&
+          this.selectionModel.getExcludedItems().length == 0
+      : !this.selectionModel.isNoneSelected()
+  }
+
+  @Input()
+  documentCounts: SelectionDataItem[]
+
+  get name(): string {
+    return this.title ? this.title.replace(/\s/g, '_').toLowerCase() : null
   }
 
   modelIsDirty: boolean = false
 
+  private keyboardIndex: number
+
   constructor(private filterPipe: FilterPipe) {
-    this.selectionModel = new FilterableDropdownSelectionModel()
     this.selectionModelChange.subscribe((updatedModel) => {
       this.modelIsDirty = updatedModel.isDirty()
     })
@@ -355,6 +444,7 @@ export class FilterableDropdownComponent {
       }, 0)
       if (this.editing) {
         this.selectionModel.reset()
+        this.modelIsDirty = false
       }
       this.opened.next(this)
     } else {
@@ -369,11 +459,13 @@ export class FilterableDropdownComponent {
     let filtered = this.filterPipe.transform(this.items, this.filterText)
     if (filtered.length == 1) {
       this.selectionModel.toggle(filtered[0].id)
-      if (this.editing) {
-        this.applyClicked()
-      } else {
-        this.dropdown.close()
-      }
+      setTimeout(() => {
+        if (this.editing) {
+          this.applyClicked()
+        } else {
+          this.dropdown.close()
+        }
+      }, 200)
     }
   }
 
@@ -386,7 +478,88 @@ export class FilterableDropdownComponent {
   }
 
   reset() {
-    this.selectionModel.reset()
+    this.selectionModel.reset(true)
     this.selectionModelChange.emit(this.selectionModel)
+  }
+
+  getUpdatedDocumentCount(id: number) {
+    if (this.documentCounts) {
+      return this.documentCounts.find((c) => c.id === id)?.document_count
+    }
+  }
+
+  listKeyDown(event: KeyboardEvent) {
+    switch (event.key) {
+      case 'ArrowDown':
+        if (event.target instanceof HTMLInputElement) {
+          if (
+            !this.filterText ||
+            event.target.selectionStart === this.filterText.length
+          ) {
+            this.keyboardIndex = -1
+            this.focusNextButtonItem()
+            event.preventDefault()
+          }
+        } else if (event.target instanceof HTMLButtonElement) {
+          this.focusNextButtonItem()
+          event.preventDefault()
+        }
+        break
+      case 'ArrowUp':
+        if (event.target instanceof HTMLButtonElement) {
+          if (this.keyboardIndex === 0) {
+            this.listFilterTextInput.nativeElement.focus()
+          } else {
+            this.focusPreviousButtonItem()
+          }
+          event.preventDefault()
+        }
+        break
+      case 'Tab':
+        // just track the index in case user uses arrows
+        if (event.target instanceof HTMLInputElement) {
+          this.keyboardIndex = 0
+        } else if (event.target instanceof HTMLButtonElement) {
+          if (event.shiftKey) {
+            if (this.keyboardIndex > 0) {
+              this.focusPreviousButtonItem(false)
+            }
+          } else {
+            this.focusNextButtonItem(false)
+          }
+        }
+      default:
+        break
+    }
+  }
+
+  focusNextButtonItem(setFocus: boolean = true) {
+    this.keyboardIndex = Math.min(this.items.length - 1, this.keyboardIndex + 1)
+    if (setFocus) this.setButtonItemFocus()
+  }
+
+  focusPreviousButtonItem(setFocus: boolean = true) {
+    this.keyboardIndex = Math.max(0, this.keyboardIndex - 1)
+    if (setFocus) this.setButtonItemFocus()
+  }
+
+  setButtonItemFocus() {
+    this.buttonItems.nativeElement.children[
+      this.keyboardIndex
+    ]?.children[0].focus()
+  }
+
+  setButtonItemIndex(index: number) {
+    // just track the index in case user uses arrows
+    this.keyboardIndex = index
+  }
+
+  hideCount(item: ObjectWithPermissions) {
+    // counts are pointless when clicking item would add to the set of docs
+    return (
+      this.selectionModel.logicalOperator === LogicalOperator.Or &&
+      this.manyToOne &&
+      this.selectionModel.get(item.id) !== ToggleableItemState.Selected
+    )
   }
 }

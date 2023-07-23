@@ -23,6 +23,12 @@ export class ToggleableDropdownButtonComponent {
   @Input()
   count: number
 
+  @Input()
+  disabled: boolean = false
+
+  @Input()
+  hideCount: boolean = false
+
   @Output()
   toggle = new EventEmitter()
 

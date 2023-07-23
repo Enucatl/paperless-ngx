@@ -1,12 +1,13 @@
 import logging
 import math
 import os
+from collections import Counter
 from contextlib import contextmanager
 
 from dateutil.parser import isoparse
 from django.conf import settings
-from documents.models import Comment
-from documents.models import Document
+from django.utils import timezone
+from guardian.shortcuts import get_users_with_perms
 from whoosh import classify
 from whoosh import highlight
 from whoosh import query
@@ -14,17 +15,24 @@ from whoosh.fields import BOOLEAN
 from whoosh.fields import DATETIME
 from whoosh.fields import KEYWORD
 from whoosh.fields import NUMERIC
-from whoosh.fields import Schema
 from whoosh.fields import TEXT
+from whoosh.fields import Schema
 from whoosh.highlight import HtmlFormatter
+from whoosh.index import FileIndex
 from whoosh.index import create_in
 from whoosh.index import exists_in
 from whoosh.index import open_dir
 from whoosh.qparser import MultifieldParser
+from whoosh.qparser import QueryParser
 from whoosh.qparser.dateparse import DateParserPlugin
+from whoosh.scoring import TF_IDF
 from whoosh.searching import ResultsPage
 from whoosh.searching import Searcher
 from whoosh.writing import AsyncWriter
+
+from documents.models import Document
+from documents.models import Note
+from documents.models import User
 
 logger = logging.getLogger("paperless.index")
 
@@ -50,7 +58,14 @@ def get_schema():
         path=TEXT(sortable=True),
         path_id=NUMERIC(),
         has_path=BOOLEAN(),
-        comments=TEXT(),
+        notes=TEXT(),
+        num_notes=NUMERIC(sortable=True, signed=False),
+        owner=TEXT(),
+        owner_id=NUMERIC(),
+        has_owner=BOOLEAN(),
+        viewer_id=KEYWORD(commas=True),
+        checksum=TEXT(),
+        original_filename=TEXT(sortable=True),
     )
 
 
@@ -89,10 +104,27 @@ def open_index_searcher():
         searcher.close()
 
 
-def update_document(writer, doc):
+def update_document(writer: AsyncWriter, doc: Document):
     tags = ",".join([t.name for t in doc.tags.all()])
     tags_ids = ",".join([str(t.id) for t in doc.tags.all()])
-    comments = ",".join([str(c.comment) for c in Comment.objects.filter(document=doc)])
+    notes = ",".join([str(c.note) for c in Note.objects.filter(document=doc)])
+    asn = doc.archive_serial_number
+    if asn is not None and (
+        asn < Document.ARCHIVE_SERIAL_NUMBER_MIN
+        or asn > Document.ARCHIVE_SERIAL_NUMBER_MAX
+    ):
+        logger.error(
+            f"Not indexing Archive Serial Number {asn} of document {doc.pk}. "
+            f"ASN is out of range "
+            f"[{Document.ARCHIVE_SERIAL_NUMBER_MIN:,}, "
+            f"{Document.ARCHIVE_SERIAL_NUMBER_MAX:,}.",
+        )
+        asn = 0
+    users_with_perms = get_users_with_perms(
+        doc,
+        only_with_perms_in=["view_document"],
+    )
+    viewer_ids = ",".join([str(u.id) for u in users_with_perms])
     writer.update_document(
         id=doc.pk,
         title=doc.title,
@@ -108,12 +140,19 @@ def update_document(writer, doc):
         has_type=doc.document_type is not None,
         created=doc.created,
         added=doc.added,
-        asn=doc.archive_serial_number,
+        asn=asn,
         modified=doc.modified,
         path=doc.storage_path.name if doc.storage_path else None,
         path_id=doc.storage_path.id if doc.storage_path else None,
         has_path=doc.storage_path is not None,
-        comments=comments,
+        notes=notes,
+        num_notes=len(notes),
+        owner=doc.owner.username if doc.owner else None,
+        owner_id=doc.owner.id if doc.owner else None,
+        has_owner=doc.owner is not None,
+        viewer_id=viewer_ids if viewer_ids else None,
+        checksum=doc.checksum,
+        original_filename=doc.original_filename,
     )
 
 
@@ -136,49 +175,98 @@ def remove_document_from_index(document):
 
 
 class DelayedQuery:
+    param_map = {
+        "correspondent": ("correspondent", ["id", "id__in", "id__none", "isnull"]),
+        "document_type": ("type", ["id", "id__in", "id__none", "isnull"]),
+        "storage_path": ("path", ["id", "id__in", "id__none", "isnull"]),
+        "owner": ("owner", ["id", "id__in", "id__none", "isnull"]),
+        "tags": ("tag", ["id__all", "id__in", "id__none"]),
+        "added": ("added", ["date__lt", "date__gt"]),
+        "created": ("created", ["date__lt", "date__gt"]),
+        "checksum": ("checksum", ["icontains", "istartswith"]),
+        "original_filename": ("original_filename", ["icontains", "istartswith"]),
+    }
+
     def _get_query(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _get_query_filter(self):
         criterias = []
-        for k, v in self.query_params.items():
-            if k == "correspondent__id":
-                criterias.append(query.Term("correspondent_id", v))
-            elif k == "tags__id__all":
-                for tag_id in v.split(","):
-                    criterias.append(query.Term("tag_id", tag_id))
-            elif k == "tags__id__none":
-                for tag_id in v.split(","):
-                    criterias.append(query.Not(query.Term("tag_id", tag_id)))
-            elif k == "document_type__id":
-                criterias.append(query.Term("type_id", v))
-            elif k == "correspondent__isnull":
-                criterias.append(query.Term("has_correspondent", v == "false"))
-            elif k == "is_tagged":
-                criterias.append(query.Term("has_tag", v == "true"))
-            elif k == "document_type__isnull":
-                criterias.append(query.Term("has_type", v == "false"))
-            elif k == "created__date__lt":
-                criterias.append(
-                    query.DateRange("created", start=None, end=isoparse(v)),
-                )
-            elif k == "created__date__gt":
-                criterias.append(
-                    query.DateRange("created", start=isoparse(v), end=None),
-                )
-            elif k == "added__date__gt":
-                criterias.append(query.DateRange("added", start=isoparse(v), end=None))
-            elif k == "added__date__lt":
-                criterias.append(query.DateRange("added", start=None, end=isoparse(v)))
-            elif k == "storage_path__id":
-                criterias.append(query.Term("path_id", v))
-            elif k == "storage_path__isnull":
-                criterias.append(query.Term("has_path", v == "false"))
+        for key, value in self.query_params.items():
+            # is_tagged is a special case
+            if key == "is_tagged":
+                criterias.append(query.Term("has_tag", self.evalBoolean(value)))
+                continue
 
+            # Don't process query params without a filter
+            if "__" not in key:
+                continue
+
+            # All other query params consist of a parameter and a query filter
+            param, query_filter = key.split("__", 1)
+            try:
+                field, supported_query_filters = self.param_map[param]
+            except KeyError:
+                logger.error(f"Unable to build a query filter for parameter {key}")
+                continue
+
+            # We only support certain filters per parameter
+            if query_filter not in supported_query_filters:
+                logger.info(
+                    f"Query filter {query_filter} not supported for parameter {param}",
+                )
+                continue
+
+            if query_filter == "id":
+                criterias.append(query.Term(f"{field}_id", value))
+            elif query_filter == "id__in":
+                in_filter = []
+                for object_id in value.split(","):
+                    in_filter.append(
+                        query.Term(f"{field}_id", object_id),
+                    )
+                criterias.append(query.Or(in_filter))
+            elif query_filter == "id__none":
+                for object_id in value.split(","):
+                    criterias.append(
+                        query.Not(query.Term(f"{field}_id", object_id)),
+                    )
+            elif query_filter == "isnull":
+                criterias.append(
+                    query.Term(f"has_{field}", self.evalBoolean(value) is False),
+                )
+            elif query_filter == "id__all":
+                for object_id in value.split(","):
+                    criterias.append(query.Term(f"{field}_id", object_id))
+            elif query_filter == "date__lt":
+                criterias.append(
+                    query.DateRange(field, start=None, end=isoparse(value)),
+                )
+            elif query_filter == "date__gt":
+                criterias.append(
+                    query.DateRange(field, start=isoparse(value), end=None),
+                )
+            elif query_filter == "icontains":
+                criterias.append(
+                    query.Term(field, value),
+                )
+            elif query_filter == "istartswith":
+                criterias.append(
+                    query.Prefix(field, value),
+                )
+
+        user_criterias = get_permissions_criterias(
+            user=self.user,
+        )
         if len(criterias) > 0:
+            if len(user_criterias) > 0:
+                criterias.append(query.Or(user_criterias))
             return query.And(criterias)
         else:
-            return None
+            return query.Or(user_criterias) if len(user_criterias) > 0 else None
+
+    def evalBoolean(self, val):
+        return val.lower() in {"true", "1"}
 
     def _get_query_sortedby(self):
         if "ordering" not in self.query_params:
@@ -194,6 +282,8 @@ class DelayedQuery:
             "correspondent__name": "correspondent",
             "document_type__name": "type",
             "archive_serial_number": "asn",
+            "num_notes": "num_notes",
+            "owner": "owner",
         }
 
         if field.startswith("-"):
@@ -207,12 +297,13 @@ class DelayedQuery:
         else:
             return sort_fields_map[field], reverse
 
-    def __init__(self, searcher: Searcher, query_params, page_size):
+    def __init__(self, searcher: Searcher, query_params, page_size, user):
         self.searcher = searcher
         self.query_params = query_params
         self.page_size = page_size
         self.saved_results = dict()
         self.first_score = None
+        self.user = user
 
     def __len__(self):
         page = self[0:1]
@@ -259,10 +350,10 @@ class DelayedFullTextQuery(DelayedQuery):
     def _get_query(self):
         q_str = self.query_params["query"]
         qp = MultifieldParser(
-            ["content", "title", "correspondent", "tag", "type", "comments"],
+            ["content", "title", "correspondent", "tag", "type", "notes"],
             self.searcher.ixreader.schema,
         )
-        qp.add_plugin(DateParserPlugin())
+        qp.add_plugin(DateParserPlugin(basedate=timezone.now()))
         q = qp.parse(q_str)
 
         corrected = self.searcher.correct_query(q, q_str)
@@ -293,13 +384,42 @@ class DelayedMoreLikeThisQuery(DelayedQuery):
         return q, mask
 
 
-def autocomplete(ix, term, limit=10):
-    with ix.reader() as reader:
-        terms = []
-        for (score, t) in reader.most_distinctive_terms(
-            "content",
-            number=limit,
-            prefix=term.lower(),
-        ):
-            terms.append(t)
-        return terms
+def autocomplete(ix: FileIndex, term: str, limit: int = 10, user: User = None):
+    """
+    Mimics whoosh.reading.IndexReader.most_distinctive_terms with permissions
+    and without scoring
+    """
+    terms = []
+
+    with ix.searcher(weighting=TF_IDF()) as s:
+        qp = QueryParser("content", schema=ix.schema)
+        q = qp.parse(f"{term.lower()}*")
+        user_criterias = get_permissions_criterias(user)
+
+        results = s.search(
+            q,
+            terms=True,
+            filter=query.Or(user_criterias) if user_criterias is not None else None,
+        )
+
+        termCounts = Counter()
+        if results.has_matched_terms():
+            for hit in results:
+                for _, term in hit.matched_terms():
+                    termCounts[term] += 1
+            terms = [t for t, _ in termCounts.most_common(limit)]
+
+    return terms
+
+
+def get_permissions_criterias(user: User = None):
+    user_criterias = [query.Term("has_owner", False)]
+    if user is not None:
+        if user.is_superuser:  # superusers see all docs
+            user_criterias = []
+        else:
+            user_criterias.append(query.Term("owner_id", user.id))
+            user_criterias.append(
+                query.Term("viewer_id", str(user.id)),
+            )
+    return user_criterias

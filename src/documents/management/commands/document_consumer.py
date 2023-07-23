@@ -1,39 +1,46 @@
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
+from fnmatch import filter
 from pathlib import Path
 from pathlib import PurePath
 from threading import Event
-from threading import Thread
 from time import monotonic
 from time import sleep
 from typing import Final
+from typing import Set
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
-from documents.models import Tag
-from documents.parsers import is_file_ext_supported
-from documents.tasks import consume_file
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
+from documents.data_models import ConsumableDocument
+from documents.data_models import DocumentMetadataOverrides
+from documents.data_models import DocumentSource
+from documents.models import Tag
+from documents.parsers import is_file_ext_supported
+from documents.tasks import consume_file
+
 try:
-    from inotifyrecursive import INotify, flags
+    from inotifyrecursive import INotify
+    from inotifyrecursive import flags
 except ImportError:  # pragma: nocover
     INotify = flags = None
 
 logger = logging.getLogger("paperless.management.consumer")
 
 
-def _tags_from_path(filepath):
-    """Walk up the directory tree from filepath to CONSUMPTION_DIR
-    and get or create Tag IDs for every directory.
+def _tags_from_path(filepath) -> Set[Tag]:
     """
-    normalized_consumption_dir = os.path.abspath(
-        os.path.normpath(settings.CONSUMPTION_DIR),
-    )
+    Walk up the directory tree from filepath to CONSUMPTION_DIR
+    and get or create Tag IDs for every directory.
+
+    Returns set of Tag models
+    """
     tag_ids = set()
-    path_parts = Path(filepath).relative_to(normalized_consumption_dir).parent.parts
+    path_parts = Path(filepath).relative_to(settings.CONSUMPTION_DIR).parent.parts
     for part in path_parts:
         tag_ids.add(
             Tag.objects.get_or_create(name__iexact=part, defaults={"name": part})[0].pk,
@@ -43,14 +50,41 @@ def _tags_from_path(filepath):
 
 
 def _is_ignored(filepath: str) -> bool:
-    normalized_consumption_dir = os.path.abspath(
-        os.path.normpath(settings.CONSUMPTION_DIR),
+    """
+    Checks if the given file should be ignored, based on configured
+    patterns.
+
+    Returns True if the file is ignored, False otherwise
+    """
+    filepath = os.path.abspath(
+        os.path.normpath(filepath),
     )
-    filepath_relative = PurePath(filepath).relative_to(normalized_consumption_dir)
-    return any(filepath_relative.match(p) for p in settings.CONSUMER_IGNORE_PATTERNS)
+
+    # Trim out the consume directory, leaving only filename and it's
+    # path relative to the consume directory
+    filepath_relative = PurePath(filepath).relative_to(settings.CONSUMPTION_DIR)
+
+    # March through the components of the path, including directories and the filename
+    # looking for anything matching
+    # foo/bar/baz/file.pdf -> (foo, bar, baz, file.pdf)
+    parts = []
+    for part in filepath_relative.parts:
+        # If the part is not the name (ie, it's a dir)
+        # Need to append the trailing slash or fnmatch doesn't match
+        # fnmatch("dir", "dir/*") == False
+        # fnmatch("dir/", "dir/*") == True
+        if part != filepath_relative.name:
+            part = part + "/"
+        parts.append(part)
+
+    for pattern in settings.CONSUMER_IGNORE_PATTERNS:
+        if len(filter(parts, pattern)):
+            return True
+
+    return False
 
 
-def _consume(filepath):
+def _consume(filepath: str) -> None:
     if os.path.isdir(filepath) or _is_ignored(filepath):
         return
 
@@ -93,8 +127,11 @@ def _consume(filepath):
     try:
         logger.info(f"Adding {filepath} to the task queue.")
         consume_file.delay(
-            filepath,
-            override_tag_ids=list(tag_ids) if tag_ids else None,
+            ConsumableDocument(
+                source=DocumentSource.ConsumeFolder,
+                original_file=filepath,
+            ),
+            DocumentMetadataOverrides(tag_ids=tag_ids),
         )
     except Exception:
         # Catch all so that the consumer won't crash.
@@ -103,7 +140,13 @@ def _consume(filepath):
         logger.exception("Error while consuming document")
 
 
-def _consume_wait_unmodified(file):
+def _consume_wait_unmodified(file: str) -> None:
+    """
+    Waits for the given file to appear unmodified based on file size
+    and modification time.  Will wait a configured number of seconds
+    and retry a configured number of times before either consuming or
+    giving up
+    """
     if _is_ignored(file):
         return
 
@@ -118,7 +161,7 @@ def _consume_wait_unmodified(file):
             new_size = stat_data.st_size
         except FileNotFoundError:
             logger.debug(
-                f"File {file} moved while waiting for it to remain " f"unmodified.",
+                f"File {file} moved while waiting for it to remain unmodified.",
             )
             return
         if new_mtime == mtime and new_size == size:
@@ -133,11 +176,15 @@ def _consume_wait_unmodified(file):
 
 
 class Handler(FileSystemEventHandler):
+    def __init__(self, pool: ThreadPoolExecutor) -> None:
+        super().__init__()
+        self._pool = pool
+
     def on_created(self, event):
-        Thread(target=_consume_wait_unmodified, args=(event.src_path,)).start()
+        self._pool.submit(_consume_wait_unmodified, event.src_path)
 
     def on_moved(self, event):
-        Thread(target=_consume_wait_unmodified, args=(event.dest_path,)).start()
+        self._pool.submit(_consume_wait_unmodified, event.dest_path)
 
 
 class Command(BaseCommand):
@@ -211,17 +258,18 @@ class Command(BaseCommand):
             timeout = self.testing_timeout_s
             logger.debug(f"Configuring timeout to {timeout}s")
 
-        observer = PollingObserver(timeout=settings.CONSUMER_POLLING)
-        observer.schedule(Handler(), directory, recursive=recursive)
-        observer.start()
-        try:
-            while observer.is_alive():
-                observer.join(timeout)
-                if self.stop_flag.is_set():
-                    observer.stop()
-        except KeyboardInterrupt:
-            observer.stop()
-        observer.join()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            observer = PollingObserver(timeout=settings.CONSUMER_POLLING)
+            observer.schedule(Handler(pool), directory, recursive=recursive)
+            observer.start()
+            try:
+                while observer.is_alive():
+                    observer.join(timeout)
+                    if self.stop_flag.is_set():
+                        observer.stop()
+            except KeyboardInterrupt:
+                observer.stop()
+            observer.join()
 
     def handle_inotify(self, directory, recursive, is_testing: bool):
         logger.info(f"Using inotify to watch directory for changes: {directory}")
@@ -247,10 +295,7 @@ class Command(BaseCommand):
         while not finished:
             try:
                 for event in inotify.read(timeout=timeout):
-                    if recursive:
-                        path = inotify.get_path(event.wd)
-                    else:
-                        path = directory
+                    path = inotify.get_path(event.wd) if recursive else directory
                     filepath = os.path.join(path, event.name)
                     notified_files[filepath] = monotonic()
 

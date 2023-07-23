@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterator
 from typing import Match
 from typing import Optional
@@ -14,6 +15,7 @@ from typing import Set
 
 from django.conf import settings
 from django.utils import timezone
+
 from documents.loggers import LoggingMixin
 from documents.signals import document_consumer_declaration
 
@@ -139,7 +141,6 @@ def run_convert(
     extra=None,
     logging_group=None,
 ) -> None:
-
     environment = os.environ.copy()
     if settings.CONVERT_MEMORY_LIMIT:
         environment["MAGICK_MEMORY_LIMIT"] = settings.CONVERT_MEMORY_LIMIT
@@ -201,7 +202,12 @@ def make_thumbnail_from_pdf_gs_fallback(in_path, temp_dir, logging_group=None) -
         return out_path
 
     except ParseError:
-        return get_default_thumbnail()
+        # The caller might expect a generated thumbnail that can be moved,
+        # so we need to copy it before it gets moved.
+        # https://github.com/paperless-ngx/paperless-ngx/issues/3631
+        default_thumbnail_path = os.path.join(temp_dir, "document.png")
+        shutil.copy2(get_default_thumbnail(), default_thumbnail_path)
+        return default_thumbnail_path
 
 
 def make_thumbnail_from_pdf(in_path, temp_dir, logging_group=None) -> str:
@@ -319,11 +325,23 @@ class DocumentParser(LoggingMixin):
         if self.progress_callback:
             self.progress_callback(current_progress, max_progress)
 
+    def read_file_handle_unicode_errors(self, filepath: Path) -> str:
+        """
+        Helper utility for reading from a file, and handling a problem with its
+        unicode, falling back to ignoring the error to remove the invalid bytes
+        """
+        try:
+            text = filepath.read_text(encoding="utf-8")
+        except UnicodeDecodeError as e:
+            self.log.warning(f"Unicode error during text reading, continuing: {e}")
+            text = filepath.read_bytes().decode("utf-8", errors="replace")
+        return text
+
     def extract_metadata(self, document_path, mime_type):
         return []
 
     def parse(self, document_path, mime_type, file_name=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_archive_path(self):
         return self.archive_path
@@ -332,7 +350,7 @@ class DocumentParser(LoggingMixin):
         """
         Returns the path to a file we can use as a thumbnail for this document.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_text(self):
         return self.text
@@ -341,5 +359,5 @@ class DocumentParser(LoggingMixin):
         return self.date
 
     def cleanup(self):
-        self.log("debug", f"Deleting directory {self.tempdir}")
+        self.log.debug(f"Deleting directory {self.tempdir}")
         shutil.rmtree(self.tempdir)

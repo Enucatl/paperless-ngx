@@ -37,7 +37,7 @@ services:
       - redisdata:/data
 
   db:
-    image: docker.io/library/postgres:13
+    image: docker.io/library/postgres:15
     restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -53,7 +53,7 @@ services:
       - db
       - broker
     ports:
-      - 8010:8000
+      - "8010:8000"
     healthcheck:
       test: ["CMD", "curl", "-fs", "-S", "--max-time", "2", "http://localhost:8000"]
       interval: 30s

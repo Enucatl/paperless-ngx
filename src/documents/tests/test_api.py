@@ -7,6 +7,7 @@ import tempfile
 import urllib.request
 import uuid
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 from unittest.mock import MagicMock
@@ -16,31 +17,39 @@ import celery
 try:
     import zoneinfo
 except ImportError:
-    import backports.zoneinfo as zoneinfo
+    from backports import zoneinfo
 
 import pytest
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
+from django.contrib.auth.models import Group
+from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.test import override_settings
 from django.utils import timezone
+from guardian.shortcuts import assign_perm
+from guardian.shortcuts import get_perms
+from rest_framework import status
+from rest_framework.test import APITestCase
+from whoosh.writing import AsyncWriter
+
 from documents import bulk_edit
 from documents import index
 from documents.models import Correspondent
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import MatchingModel
+from documents.models import Note
 from documents.models import PaperlessTask
 from documents.models import SavedView
 from documents.models import StoragePath
 from documents.models import Tag
-from documents.models import Comment
 from documents.tests.utils import DirectoriesMixin
+from documents.tests.utils import DocumentConsumeDelayMixin
 from paperless import version
-from rest_framework.test import APITestCase
-from whoosh.writing import AsyncWriter
 
 
-class TestDocumentApi(DirectoriesMixin, APITestCase):
+class TestDocumentApi(DirectoriesMixin, DocumentConsumeDelayMixin, APITestCase):
     def setUp(self):
         super().setUp()
 
@@ -48,7 +57,6 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         self.client.force_authenticate(user=self.user)
 
     def testDocuments(self):
-
         response = self.client.get("/api/documents/").data
 
         self.assertEqual(response["count"], 0)
@@ -69,7 +77,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         doc.tags.add(tag)
 
         response = self.client.get("/api/documents/", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
 
         returned_doc = response.data["results"][0]
@@ -90,7 +98,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         doc_after_save = Document.objects.get(id=doc.id)
 
@@ -104,9 +112,9 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
     def test_document_fields(self):
         c = Correspondent.objects.create(name="c", pk=41)
         dt = DocumentType.objects.create(name="dt", pk=63)
-        tag = Tag.objects.create(name="t", pk=85)
+        Tag.objects.create(name="t", pk=85)
         storage_path = StoragePath.objects.create(name="sp", pk=77, path="p")
-        doc = Document.objects.create(
+        Document.objects.create(
             title="WOW",
             content="the content",
             correspondent=c,
@@ -117,54 +125,53 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get("/api/documents/", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results_full = response.data["results"]
-        self.assertTrue("content" in results_full[0])
-        self.assertTrue("id" in results_full[0])
+        self.assertIn("content", results_full[0])
+        self.assertIn("id", results_full[0])
 
         response = self.client.get("/api/documents/?fields=id", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertFalse("content" in results[0])
-        self.assertTrue("id" in results[0])
+        self.assertIn("id", results[0])
         self.assertEqual(len(results[0]), 1)
 
         response = self.client.get("/api/documents/?fields=content", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
-        self.assertTrue("content" in results[0])
+        self.assertIn("content", results[0])
         self.assertFalse("id" in results[0])
         self.assertEqual(len(results[0]), 1)
 
         response = self.client.get("/api/documents/?fields=id,content", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
-        self.assertTrue("content" in results[0])
-        self.assertTrue("id" in results[0])
+        self.assertIn("content", results[0])
+        self.assertIn("id", results[0])
         self.assertEqual(len(results[0]), 2)
 
         response = self.client.get(
             "/api/documents/?fields=id,conteasdnt",
             format="json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertFalse("content" in results[0])
-        self.assertTrue("id" in results[0])
+        self.assertIn("id", results[0])
         self.assertEqual(len(results[0]), 1)
 
         response = self.client.get("/api/documents/?fields=", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
-        self.assertEqual(results_full, results)
+        self.assertEqual(len(results_full[0]), len(results[0]))
 
         response = self.client.get("/api/documents/?fields=dgfhs", format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results[0]), 0)
 
     def test_document_actions(self):
-
         _, filename = tempfile.mkstemp(dir=self.dirs.originals_dir)
 
         content = b"This is a test"
@@ -187,22 +194,80 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         response = self.client.get(f"/api/documents/{doc.pk}/download/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content)
 
         response = self.client.get(f"/api/documents/{doc.pk}/preview/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content)
 
         response = self.client.get(f"/api/documents/{doc.pk}/thumb/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content_thumbnail)
+
+    def test_document_actions_with_perms(self):
+        """
+        GIVEN:
+            - Document with owner and without granted permissions
+            - User is then granted permissions
+        WHEN:
+            - User tries to load preview, thumbnail
+        THEN:
+            - Initially, HTTP 403 Forbidden
+            - With permissions, HTTP 200 OK
+        """
+        _, filename = tempfile.mkstemp(dir=self.dirs.originals_dir)
+
+        content = b"This is a test"
+        content_thumbnail = b"thumbnail content"
+
+        with open(filename, "wb") as f:
+            f.write(content)
+
+        user1 = User.objects.create_user(username="test1")
+        user2 = User.objects.create_user(username="test2")
+        user1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        user2.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+
+        self.client.force_authenticate(user2)
+
+        doc = Document.objects.create(
+            title="none",
+            filename=os.path.basename(filename),
+            mime_type="application/pdf",
+            owner=user1,
+        )
+
+        with open(
+            os.path.join(self.dirs.thumbnail_dir, f"{doc.pk:07d}.webp"),
+            "wb",
+        ) as f:
+            f.write(content_thumbnail)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/download/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/preview/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/thumb/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        assign_perm("view_document", user2, doc)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/download/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/preview/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get(f"/api/documents/{doc.pk}/thumb/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     @override_settings(FILENAME_FORMAT="")
     def test_download_with_archive(self):
-
         content = b"This is a test"
         content_archive = b"This is the same test but archived"
 
@@ -221,30 +286,29 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         response = self.client.get(f"/api/documents/{doc.pk}/download/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content_archive)
 
         response = self.client.get(
             f"/api/documents/{doc.pk}/download/?original=true",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content)
 
         response = self.client.get(f"/api/documents/{doc.pk}/preview/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content_archive)
 
         response = self.client.get(
             f"/api/documents/{doc.pk}/preview/?original=true",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.content, content)
 
     def test_document_actions_not_existing_file(self):
-
         doc = Document.objects.create(
             title="none",
             filename=os.path.basename("asd"),
@@ -252,16 +316,15 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get(f"/api/documents/{doc.pk}/download/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
         response = self.client.get(f"/api/documents/{doc.pk}/preview/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
         response = self.client.get(f"/api/documents/{doc.pk}/thumb/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_document_filters(self):
-
         doc1 = Document.objects.create(
             title="none1",
             checksum="A",
@@ -288,13 +351,13 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         doc3.tags.add(tag_3)
 
         response = self.client.get("/api/documents/?is_in_inbox=true")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["id"], doc1.id)
 
         response = self.client.get("/api/documents/?is_in_inbox=false")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 2)
         self.assertCountEqual([results[0]["id"], results[1]["id"]], [doc2.id, doc3.id])
@@ -302,7 +365,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__in={tag_inbox.id},{tag_3.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 2)
         self.assertCountEqual([results[0]["id"], results[1]["id"]], [doc1.id, doc3.id])
@@ -310,7 +373,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__in={tag_2.id},{tag_3.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 2)
         self.assertCountEqual([results[0]["id"], results[1]["id"]], [doc2.id, doc3.id])
@@ -318,7 +381,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__all={tag_2.id},{tag_3.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["id"], doc3.id)
@@ -326,19 +389,19 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__all={tag_inbox.id},{tag_3.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 0)
 
         response = self.client.get(
             f"/api/documents/?tags__id__all={tag_inbox.id}a{tag_3.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 3)
 
         response = self.client.get(f"/api/documents/?tags__id__none={tag_3.id}")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 2)
         self.assertCountEqual([results[0]["id"], results[1]["id"]], [doc1.id, doc2.id])
@@ -346,7 +409,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__none={tag_3.id},{tag_2.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["id"], doc1.id)
@@ -354,12 +417,79 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         response = self.client.get(
             f"/api/documents/?tags__id__none={tag_2.id},{tag_inbox.id}",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 0)
 
-    def test_documents_title_content_filter(self):
+    def test_document_checksum_filter(self):
+        Document.objects.create(
+            title="none1",
+            checksum="A",
+            mime_type="application/pdf",
+        )
+        doc2 = Document.objects.create(
+            title="none2",
+            checksum="B",
+            mime_type="application/pdf",
+        )
+        Document.objects.create(
+            title="none3",
+            checksum="C",
+            mime_type="application/pdf",
+        )
 
+        response = self.client.get("/api/documents/?checksum__iexact=B")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], doc2.id)
+
+        response = self.client.get("/api/documents/?checksum__iexact=X")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 0)
+
+    def test_document_original_filename_filter(self):
+        doc1 = Document.objects.create(
+            title="none1",
+            checksum="A",
+            mime_type="application/pdf",
+            original_filename="docA.pdf",
+        )
+        doc2 = Document.objects.create(
+            title="none2",
+            checksum="B",
+            mime_type="application/pdf",
+            original_filename="docB.pdf",
+        )
+        doc3 = Document.objects.create(
+            title="none3",
+            checksum="C",
+            mime_type="application/pdf",
+            original_filename="docC.pdf",
+        )
+
+        response = self.client.get("/api/documents/?original_filename__iexact=DOCa.pdf")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], doc1.id)
+
+        response = self.client.get("/api/documents/?original_filename__iexact=docx.pdf")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 0)
+
+        response = self.client.get("/api/documents/?original_filename__istartswith=dOc")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 3)
+        self.assertCountEqual(
+            [results[0]["id"], results[1]["id"], results[2]["id"]],
+            [doc1.id, doc2.id, doc3.id],
+        )
+
+    def test_documents_title_content_filter(self):
         doc1 = Document.objects.create(
             title="title A",
             content="content A",
@@ -386,7 +516,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get("/api/documents/?title_content=A")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 3)
         self.assertCountEqual(
@@ -395,7 +525,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get("/api/documents/?title_content=B")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 3)
         self.assertCountEqual(
@@ -404,9 +534,101 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get("/api/documents/?title_content=X")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data["results"]
         self.assertEqual(len(results), 0)
+
+    def test_document_owner_filters(self):
+        """
+        GIVEN:
+            - Documents with owners, with and without granted permissions
+        WHEN:
+            - User filters by owner
+        THEN:
+            - Owner filters work correctly but still respect permissions
+        """
+        u1 = User.objects.create_user("user1")
+        u2 = User.objects.create_user("user2")
+        u1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        u2.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+
+        u1_doc1 = Document.objects.create(
+            title="none1",
+            checksum="A",
+            mime_type="application/pdf",
+            owner=u1,
+        )
+        Document.objects.create(
+            title="none2",
+            checksum="B",
+            mime_type="application/pdf",
+            owner=u2,
+        )
+        u0_doc1 = Document.objects.create(
+            title="none3",
+            checksum="C",
+            mime_type="application/pdf",
+        )
+        u1_doc2 = Document.objects.create(
+            title="none4",
+            checksum="D",
+            mime_type="application/pdf",
+            owner=u1,
+        )
+        u2_doc2 = Document.objects.create(
+            title="none5",
+            checksum="E",
+            mime_type="application/pdf",
+            owner=u2,
+        )
+
+        self.client.force_authenticate(user=u1)
+        assign_perm("view_document", u1, u2_doc2)
+
+        # Will not show any u1 docs or u2_doc1 which isn't shared
+        response = self.client.get(f"/api/documents/?owner__id__none={u1.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 2)
+        self.assertCountEqual(
+            [results[0]["id"], results[1]["id"]],
+            [u0_doc1.id, u2_doc2.id],
+        )
+
+        # Will not show any u1 docs, u0_doc1 which has no owner or u2_doc1 which isn't shared
+        response = self.client.get(
+            f"/api/documents/?owner__id__none={u1.id}&owner__isnull=false",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertCountEqual([results[0]["id"]], [u2_doc2.id])
+
+        # Will not show any u1 docs, u2_doc2 which is shared but has owner
+        response = self.client.get(
+            f"/api/documents/?owner__id__none={u1.id}&owner__isnull=true",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertCountEqual([results[0]["id"]], [u0_doc1.id])
+
+        # Will not show any u1 docs or u2_doc1 which is not shared
+        response = self.client.get(f"/api/documents/?owner__id={u2.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertCountEqual([results[0]["id"]], [u2_doc2.id])
+
+        # Will not show u2_doc1 which is not shared
+        response = self.client.get(f"/api/documents/?owner__id__in={u1.id},{u2.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 3)
+        self.assertCountEqual(
+            [results[0]["id"], results[1]["id"], results[2]["id"]],
+            [u1_doc1.id, u1_doc2.id, u2_doc2.id],
+        )
 
     def test_search(self):
         d1 = Document.objects.create(
@@ -426,6 +648,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             content="things i paid for in september",
             pk=3,
             checksum="C",
+            original_filename="someepdf.pdf",
         )
         with AsyncWriter(index.open_index()) as writer:
             # Note to future self: there is a reason we dont use a model signal handler to update the index: some operations edit many documents at once
@@ -438,21 +661,26 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         results = response.data["results"]
         self.assertEqual(response.data["count"], 3)
         self.assertEqual(len(results), 3)
+        self.assertCountEqual(response.data["all"], [d1.id, d2.id, d3.id])
 
         response = self.client.get("/api/documents/?query=september")
         results = response.data["results"]
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(len(results), 1)
+        self.assertCountEqual(response.data["all"], [d3.id])
+        self.assertEqual(results[0]["original_file_name"], "someepdf.pdf")
 
         response = self.client.get("/api/documents/?query=statement")
         results = response.data["results"]
         self.assertEqual(response.data["count"], 2)
         self.assertEqual(len(results), 2)
+        self.assertCountEqual(response.data["all"], [d2.id, d3.id])
 
         response = self.client.get("/api/documents/?query=sfegdfg")
         results = response.data["results"]
         self.assertEqual(response.data["count"], 0)
         self.assertEqual(len(results), 0)
+        self.assertCountEqual(response.data["all"], [])
 
     def test_search_multi_page(self):
         with AsyncWriter(index.open_index()) as writer:
@@ -501,31 +729,355 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 index.update_document(writer, doc)
 
         response = self.client.get("/api/documents/?query=content&page=0&page_size=10")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         response = self.client.get("/api/documents/?query=content&page=3&page_size=10")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @override_settings(
+        TIME_ZONE="UTC",
+    )
+    def test_search_added_in_last_week(self):
+        """
+        GIVEN:
+            - Three documents added right now
+            - The timezone is UTC time
+        WHEN:
+            - Query for documents added in the last 7 days
+        THEN:
+            - All three recent documents are returned
+        """
+        d1 = Document.objects.create(
+            title="invoice",
+            content="the thing i bought at a shop and paid with bank account",
+            checksum="A",
+            pk=1,
+        )
+        d2 = Document.objects.create(
+            title="bank statement 1",
+            content="things i paid for in august",
+            pk=2,
+            checksum="B",
+        )
+        d3 = Document.objects.create(
+            title="bank statement 3",
+            content="things i paid for in september",
+            pk=3,
+            checksum="C",
+        )
+        with index.open_index_writer() as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/documents/?query=added:[-1 week to now]")
+        results = response.data["results"]
+        # Expect 3 documents returned
+        self.assertEqual(len(results), 3)
+
+        for idx, subset in enumerate(
+            [
+                {"id": 1, "title": "invoice"},
+                {"id": 2, "title": "bank statement 1"},
+                {"id": 3, "title": "bank statement 3"},
+            ],
+        ):
+            result = results[idx]
+            # Assert subset in results
+            self.assertDictEqual(result, {**result, **subset})
+
+    @override_settings(
+        TIME_ZONE="America/Chicago",
+    )
+    def test_search_added_in_last_week_with_timezone_behind(self):
+        """
+        GIVEN:
+            - Two documents added right now
+            - One document added over a week ago
+            - The timezone is behind UTC time (-6)
+        WHEN:
+            - Query for documents added in the last 7 days
+        THEN:
+            - The two recent documents are returned
+        """
+        d1 = Document.objects.create(
+            title="invoice",
+            content="the thing i bought at a shop and paid with bank account",
+            checksum="A",
+            pk=1,
+        )
+        d2 = Document.objects.create(
+            title="bank statement 1",
+            content="things i paid for in august",
+            pk=2,
+            checksum="B",
+        )
+        d3 = Document.objects.create(
+            title="bank statement 3",
+            content="things i paid for in september",
+            pk=3,
+            checksum="C",
+            # 7 days, 1 hour and 1 minute ago
+            added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
+        )
+        with index.open_index_writer() as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/documents/?query=added:[-1 week to now]")
+        results = response.data["results"]
+
+        # Expect 2 documents returned
+        self.assertEqual(len(results), 2)
+
+        for idx, subset in enumerate(
+            [{"id": 1, "title": "invoice"}, {"id": 2, "title": "bank statement 1"}],
+        ):
+            result = results[idx]
+            # Assert subset in results
+            self.assertDictEqual(result, {**result, **subset})
+
+    @override_settings(
+        TIME_ZONE="Europe/Sofia",
+    )
+    def test_search_added_in_last_week_with_timezone_ahead(self):
+        """
+        GIVEN:
+            - Two documents added right now
+            - One document added over a week ago
+            - The timezone is behind UTC time (+2)
+        WHEN:
+            - Query for documents added in the last 7 days
+        THEN:
+            - The two recent documents are returned
+        """
+        d1 = Document.objects.create(
+            title="invoice",
+            content="the thing i bought at a shop and paid with bank account",
+            checksum="A",
+            pk=1,
+        )
+        d2 = Document.objects.create(
+            title="bank statement 1",
+            content="things i paid for in august",
+            pk=2,
+            checksum="B",
+        )
+        d3 = Document.objects.create(
+            title="bank statement 3",
+            content="things i paid for in september",
+            pk=3,
+            checksum="C",
+            # 7 days, 1 hour and 1 minute ago
+            added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
+        )
+        with index.open_index_writer() as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/documents/?query=added:[-1 week to now]")
+        results = response.data["results"]
+
+        # Expect 2 documents returned
+        self.assertEqual(len(results), 2)
+
+        for idx, subset in enumerate(
+            [{"id": 1, "title": "invoice"}, {"id": 2, "title": "bank statement 1"}],
+        ):
+            result = results[idx]
+            # Assert subset in results
+            self.assertDictEqual(result, {**result, **subset})
+
+    def test_search_added_in_last_month(self):
+        """
+        GIVEN:
+            - One document added right now
+            - One documents added about a week ago
+            - One document added over 1 month
+        WHEN:
+            - Query for documents added in the last month
+        THEN:
+            - The two recent documents are returned
+        """
+        d1 = Document.objects.create(
+            title="invoice",
+            content="the thing i bought at a shop and paid with bank account",
+            checksum="A",
+            pk=1,
+        )
+        d2 = Document.objects.create(
+            title="bank statement 1",
+            content="things i paid for in august",
+            pk=2,
+            checksum="B",
+            # 1 month, 1 day ago
+            added=timezone.now() - relativedelta(months=1, days=1),
+        )
+        d3 = Document.objects.create(
+            title="bank statement 3",
+            content="things i paid for in september",
+            pk=3,
+            checksum="C",
+            # 7 days, 1 hour and 1 minute ago
+            added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
+        )
+
+        with index.open_index_writer() as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/documents/?query=added:[-1 month to now]")
+        results = response.data["results"]
+
+        # Expect 2 documents returned
+        self.assertEqual(len(results), 2)
+
+        for idx, subset in enumerate(
+            [{"id": 1, "title": "invoice"}, {"id": 3, "title": "bank statement 3"}],
+        ):
+            result = results[idx]
+            # Assert subset in results
+            self.assertDictEqual(result, {**result, **subset})
+
+    @override_settings(
+        TIME_ZONE="America/Denver",
+    )
+    def test_search_added_in_last_month_timezone_behind(self):
+        """
+        GIVEN:
+            - One document added right now
+            - One documents added about a week ago
+            - One document added over 1 month
+            - The timezone is behind UTC time (-6 or -7)
+        WHEN:
+            - Query for documents added in the last month
+        THEN:
+            - The two recent documents are returned
+        """
+        d1 = Document.objects.create(
+            title="invoice",
+            content="the thing i bought at a shop and paid with bank account",
+            checksum="A",
+            pk=1,
+        )
+        d2 = Document.objects.create(
+            title="bank statement 1",
+            content="things i paid for in august",
+            pk=2,
+            checksum="B",
+            # 1 month, 1 day ago
+            added=timezone.now() - relativedelta(months=1, days=1),
+        )
+        d3 = Document.objects.create(
+            title="bank statement 3",
+            content="things i paid for in september",
+            pk=3,
+            checksum="C",
+            # 7 days, 1 hour and 1 minute ago
+            added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
+        )
+
+        with index.open_index_writer() as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/documents/?query=added:[-1 month to now]")
+        results = response.data["results"]
+
+        # Expect 2 documents returned
+        self.assertEqual(len(results), 2)
+
+        for idx, subset in enumerate(
+            [{"id": 1, "title": "invoice"}, {"id": 3, "title": "bank statement 3"}],
+        ):
+            result = results[idx]
+            # Assert subset in results
+            self.assertDictEqual(result, {**result, **subset})
 
     @mock.patch("documents.index.autocomplete")
     def test_search_autocomplete(self, m):
-        m.side_effect = lambda ix, term, limit: [term for _ in range(limit)]
+        m.side_effect = lambda ix, term, limit, user: [term for _ in range(limit)]
 
         response = self.client.get("/api/search/autocomplete/?term=test")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 10)
 
         response = self.client.get("/api/search/autocomplete/?term=test&limit=20")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 20)
 
         response = self.client.get("/api/search/autocomplete/?term=test&limit=-1")
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         response = self.client.get("/api/search/autocomplete/")
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         response = self.client.get("/api/search/autocomplete/?term=")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 10)
+
+    def test_search_autocomplete_respect_permissions(self):
+        """
+        GIVEN:
+            - Multiple users and documents with & without permissions
+        WHEN:
+            - API reuqest for autocomplete is made by user with or without permissions
+        THEN:
+            - Terms only within docs user has access to are returned
+        """
+        u1 = User.objects.create_user("user1")
+        u2 = User.objects.create_user("user2")
+
+        self.client.force_authenticate(user=u1)
+
+        d1 = Document.objects.create(
+            title="doc1",
+            content="apples",
+            checksum="1",
+            owner=u1,
+        )
+        d2 = Document.objects.create(
+            title="doc2",
+            content="applebaum",
+            checksum="2",
+            owner=u1,
+        )
+        d3 = Document.objects.create(
+            title="doc3",
+            content="appletini",
+            checksum="3",
+            owner=u1,
+        )
+
+        with AsyncWriter(index.open_index()) as writer:
+            index.update_document(writer, d1)
+            index.update_document(writer, d2)
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/search/autocomplete/?term=app")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [b"apples", b"applebaum", b"appletini"])
+
+        d3.owner = u2
+
+        with AsyncWriter(index.open_index()) as writer:
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/search/autocomplete/?term=app")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [b"apples", b"applebaum"])
+
+        assign_perm("view_document", u1, d3)
+
+        with AsyncWriter(index.open_index()) as writer:
+            index.update_document(writer, d3)
+
+        response = self.client.get("/api/search/autocomplete/?term=app")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [b"apples", b"applebaum", b"appletini"])
 
     @pytest.mark.skip(reason="Not implemented yet")
     def test_search_spelling_correction(self):
@@ -575,7 +1127,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         response = self.client.get(f"/api/documents/?more_like_id={d2.id}")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         results = response.data["results"]
 
@@ -587,8 +1139,11 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         t = Tag.objects.create(name="tag")
         t2 = Tag.objects.create(name="tag2")
         c = Correspondent.objects.create(name="correspondent")
+        c2 = Correspondent.objects.create(name="correspondent2")
         dt = DocumentType.objects.create(name="type")
+        dt2 = DocumentType.objects.create(name="type2")
         sp = StoragePath.objects.create(name="path")
+        sp2 = StoragePath.objects.create(name="path2")
 
         d1 = Document.objects.create(checksum="1", correspondent=c, content="test")
         d2 = Document.objects.create(checksum="2", document_type=dt, content="test")
@@ -600,15 +1155,24 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             checksum="4",
             created=timezone.make_aware(datetime.datetime(2020, 7, 13)),
             content="test",
+            original_filename="doc4.pdf",
         )
         d4.tags.add(t2)
         d5 = Document.objects.create(
             checksum="5",
             added=timezone.make_aware(datetime.datetime(2020, 7, 13)),
             content="test",
+            original_filename="doc5.pdf",
         )
-        d6 = Document.objects.create(checksum="6", content="test2")
+        Document.objects.create(checksum="6", content="test2")
         d7 = Document.objects.create(checksum="7", storage_path=sp, content="test")
+        d8 = Document.objects.create(
+            checksum="foo",
+            correspondent=c2,
+            document_type=dt2,
+            storage_path=sp2,
+            content="test",
+        )
 
         with AsyncWriter(index.open_index()) as writer:
             for doc in Document.objects.all():
@@ -616,32 +1180,56 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         def search_query(q):
             r = self.client.get("/api/documents/?query=test" + q)
-            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.status_code, status.HTTP_200_OK)
             return [hit["id"] for hit in r.data["results"]]
 
         self.assertCountEqual(
             search_query(""),
-            [d1.id, d2.id, d3.id, d4.id, d5.id, d7.id],
+            [d1.id, d2.id, d3.id, d4.id, d5.id, d7.id, d8.id],
         )
         self.assertCountEqual(search_query("&is_tagged=true"), [d3.id, d4.id])
         self.assertCountEqual(
             search_query("&is_tagged=false"),
-            [d1.id, d2.id, d5.id, d7.id],
+            [d1.id, d2.id, d5.id, d7.id, d8.id],
         )
         self.assertCountEqual(search_query("&correspondent__id=" + str(c.id)), [d1.id])
+        self.assertCountEqual(
+            search_query(f"&correspondent__id__in={c.id},{c2.id}"),
+            [d1.id, d8.id],
+        )
+        self.assertCountEqual(
+            search_query("&correspondent__id__none=" + str(c.id)),
+            [d2.id, d3.id, d4.id, d5.id, d7.id, d8.id],
+        )
         self.assertCountEqual(search_query("&document_type__id=" + str(dt.id)), [d2.id])
+        self.assertCountEqual(
+            search_query(f"&document_type__id__in={dt.id},{dt2.id}"),
+            [d2.id, d8.id],
+        )
+        self.assertCountEqual(
+            search_query("&document_type__id__none=" + str(dt.id)),
+            [d1.id, d3.id, d4.id, d5.id, d7.id, d8.id],
+        )
         self.assertCountEqual(search_query("&storage_path__id=" + str(sp.id)), [d7.id])
+        self.assertCountEqual(
+            search_query(f"&storage_path__id__in={sp.id},{sp2.id}"),
+            [d7.id, d8.id],
+        )
+        self.assertCountEqual(
+            search_query("&storage_path__id__none=" + str(sp.id)),
+            [d1.id, d2.id, d3.id, d4.id, d5.id, d8.id],
+        )
 
         self.assertCountEqual(
-            search_query("&storage_path__isnull"),
+            search_query("&storage_path__isnull=true"),
             [d1.id, d2.id, d3.id, d4.id, d5.id],
         )
         self.assertCountEqual(
-            search_query("&correspondent__isnull"),
+            search_query("&correspondent__isnull=true"),
             [d2.id, d3.id, d4.id, d5.id, d7.id],
         )
         self.assertCountEqual(
-            search_query("&document_type__isnull"),
+            search_query("&document_type__isnull=true"),
             [d1.id, d3.id, d4.id, d5.id, d7.id],
         )
         self.assertCountEqual(
@@ -653,6 +1241,14 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             search_query("&tags__id__all=" + str(t2.id)),
             [d3.id, d4.id],
         )
+        self.assertCountEqual(
+            search_query(f"&tags__id__in={t.id},{t2.id}"),
+            [d3.id, d4.id],
+        )
+        self.assertCountEqual(
+            search_query(f"&tags__id__none={t.id},{t2.id}"),
+            [d1.id, d2.id, d5.id, d7.id, d8.id],
+        )
 
         self.assertIn(
             d4.id,
@@ -713,8 +1309,134 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 + datetime.datetime(2020, 1, 2).strftime("%Y-%m-%d"),
             ),
         )
+
+        self.assertEqual(
+            search_query("&checksum__icontains=foo"),
+            [d8.id],
+        )
+
+        self.assertCountEqual(
+            search_query("&original_filename__istartswith=doc"),
+            [d4.id, d5.id],
+        )
+
+    def test_search_filtering_respect_owner(self):
+        """
+        GIVEN:
+            - Documents with owners set & without
+        WHEN:
+            - API reuqest for advanced query (search) is made by non-superuser
+            - API reuqest for advanced query (search) is made by superuser
+        THEN:
+            - Only owned docs are returned for regular users
+            - All docs are returned for superuser
+        """
+        superuser = User.objects.create_superuser("superuser")
+        u1 = User.objects.create_user("user1")
+        u2 = User.objects.create_user("user2")
+        u1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        u2.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+
+        Document.objects.create(checksum="1", content="test 1", owner=u1)
+        Document.objects.create(checksum="2", content="test 2", owner=u2)
+        Document.objects.create(checksum="3", content="test 3", owner=u2)
+        Document.objects.create(checksum="4", content="test 4")
+
+        with AsyncWriter(index.open_index()) as writer:
+            for doc in Document.objects.all():
+                index.update_document(writer, doc)
+
+        self.client.force_authenticate(user=u1)
+        r = self.client.get("/api/documents/?query=test")
+        self.assertEqual(r.data["count"], 2)
+        r = self.client.get("/api/documents/?query=test&document_type__id__none=1")
+        self.assertEqual(r.data["count"], 2)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__none={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__in={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get(
+            f"/api/documents/?query=test&owner__id__none={u1.id}&owner__isnull=true",
+        )
+        self.assertEqual(r.data["count"], 1)
+
+        self.client.force_authenticate(user=u2)
+        r = self.client.get("/api/documents/?query=test")
+        self.assertEqual(r.data["count"], 3)
+        r = self.client.get("/api/documents/?query=test&document_type__id__none=1")
+        self.assertEqual(r.data["count"], 3)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__none={u2.id}")
+        self.assertEqual(r.data["count"], 1)
+
+        self.client.force_authenticate(user=superuser)
+        r = self.client.get("/api/documents/?query=test")
+        self.assertEqual(r.data["count"], 4)
+        r = self.client.get("/api/documents/?query=test&document_type__id__none=1")
+        self.assertEqual(r.data["count"], 4)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__none={u1.id}")
+        self.assertEqual(r.data["count"], 3)
+
+    def test_search_filtering_with_object_perms(self):
+        """
+        GIVEN:
+            - Documents with granted view permissions to others
+        WHEN:
+            - API reuqest for advanced query (search) is made by user
+        THEN:
+            - Only docs with granted view permissions are returned
+        """
+        u1 = User.objects.create_user("user1")
+        u2 = User.objects.create_user("user2")
+        u1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        u2.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+
+        Document.objects.create(checksum="1", content="test 1", owner=u1)
+        d2 = Document.objects.create(checksum="2", content="test 2", owner=u2)
+        d3 = Document.objects.create(checksum="3", content="test 3", owner=u2)
+        Document.objects.create(checksum="4", content="test 4")
+
+        with AsyncWriter(index.open_index()) as writer:
+            for doc in Document.objects.all():
+                index.update_document(writer, doc)
+
+        self.client.force_authenticate(user=u1)
+        r = self.client.get("/api/documents/?query=test")
+        self.assertEqual(r.data["count"], 2)
+        r = self.client.get("/api/documents/?query=test&document_type__id__none=1")
+        self.assertEqual(r.data["count"], 2)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__none={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get(f"/api/documents/?query=test&owner__id={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__in={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get("/api/documents/?query=test&owner__isnull=true")
+        self.assertEqual(r.data["count"], 1)
+
+        assign_perm("view_document", u1, d2)
+        assign_perm("view_document", u1, d3)
+
+        with AsyncWriter(index.open_index()) as writer:
+            for doc in [d2, d3]:
+                index.update_document(writer, doc)
+
+        self.client.force_authenticate(user=u1)
+        r = self.client.get("/api/documents/?query=test")
+        self.assertEqual(r.data["count"], 4)
+        r = self.client.get("/api/documents/?query=test&document_type__id__none=1")
+        self.assertEqual(r.data["count"], 4)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__none={u1.id}")
+        self.assertEqual(r.data["count"], 3)
+        r = self.client.get(f"/api/documents/?query=test&owner__id={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get(f"/api/documents/?query=test&owner__id__in={u1.id}")
+        self.assertEqual(r.data["count"], 1)
+        r = self.client.get("/api/documents/?query=test&owner__isnull=true")
+        self.assertEqual(r.data["count"], 1)
 
     def test_search_sorting(self):
+        u1 = User.objects.create_user("user1")
+        u2 = User.objects.create_user("user2")
         c1 = Correspondent.objects.create(name="corres Ax")
         c2 = Correspondent.objects.create(name="corres Cx")
         c3 = Correspondent.objects.create(name="corres Bx")
@@ -724,6 +1446,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             content="test",
             archive_serial_number=2,
             title="3",
+            owner=u1,
         )
         d2 = Document.objects.create(
             checksum="2",
@@ -731,6 +1454,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             content="test",
             archive_serial_number=3,
             title="2",
+            owner=u2,
         )
         d3 = Document.objects.create(
             checksum="3",
@@ -739,6 +1463,21 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             archive_serial_number=1,
             title="1",
         )
+        Note.objects.create(
+            note="This is a note.",
+            document=d1,
+            user=u1,
+        )
+        Note.objects.create(
+            note="This is a note.",
+            document=d1,
+            user=u1,
+        )
+        Note.objects.create(
+            note="This is a note.",
+            document=d3,
+            user=u1,
+        )
 
         with AsyncWriter(index.open_index()) as writer:
             for doc in Document.objects.all():
@@ -746,7 +1485,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         def search_query(q):
             r = self.client.get("/api/documents/?query=test" + q)
-            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.status_code, status.HTTP_200_OK)
             return [hit["id"] for hit in r.data["results"]]
 
         self.assertListEqual(
@@ -767,33 +1506,99 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             search_query("&ordering=-correspondent__name"),
             [d2.id, d3.id, d1.id],
         )
+        self.assertListEqual(
+            search_query("&ordering=num_notes"),
+            [d2.id, d3.id, d1.id],
+        )
+        self.assertListEqual(
+            search_query("&ordering=-num_notes"),
+            [d1.id, d3.id, d2.id],
+        )
+        self.assertListEqual(
+            search_query("&ordering=owner"),
+            [d1.id, d2.id, d3.id],
+        )
+        self.assertListEqual(
+            search_query("&ordering=-owner"),
+            [d3.id, d2.id, d1.id],
+        )
+
+    def test_pagination_all(self):
+        """
+        GIVEN:
+            - A set of 50 documents
+        WHEN:
+            - API reuqest for document filtering
+        THEN:
+            - Results are paginated (25 items) and response["all"] returns all ids (50 items)
+        """
+        t = Tag.objects.create(name="tag")
+        docs = []
+        for i in range(50):
+            d = Document.objects.create(checksum=i, content=f"test{i}")
+            d.tags.add(t)
+            docs.append(d)
+
+        response = self.client.get(
+            f"/api/documents/?tags__id__in={t.id}",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 25)
+        self.assertEqual(len(response.data["all"]), 50)
+        self.assertCountEqual(response.data["all"], [d.id for d in docs])
 
     def test_statistics(self):
-
-        doc1 = Document.objects.create(title="none1", checksum="A")
-        doc2 = Document.objects.create(title="none2", checksum="B")
-        doc3 = Document.objects.create(title="none3", checksum="C")
+        doc1 = Document.objects.create(
+            title="none1",
+            checksum="A",
+            mime_type="application/pdf",
+            content="abc",
+        )
+        Document.objects.create(
+            title="none2",
+            checksum="B",
+            mime_type="application/pdf",
+            content="123",
+        )
+        Document.objects.create(
+            title="none3",
+            checksum="C",
+            mime_type="text/plain",
+            content="hello",
+        )
 
         tag_inbox = Tag.objects.create(name="t1", is_inbox_tag=True)
 
         doc1.tags.add(tag_inbox)
 
         response = self.client.get("/api/statistics/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["documents_total"], 3)
         self.assertEqual(response.data["documents_inbox"], 1)
+        self.assertEqual(response.data["inbox_tag"], tag_inbox.pk)
+        self.assertEqual(
+            response.data["document_file_type_counts"][0]["mime_type_count"],
+            2,
+        )
+        self.assertEqual(
+            response.data["document_file_type_counts"][1]["mime_type_count"],
+            1,
+        )
+        self.assertEqual(response.data["character_count"], 11)
 
     def test_statistics_no_inbox_tag(self):
         Document.objects.create(title="none1", checksum="A")
 
         response = self.client.get("/api/statistics/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["documents_inbox"], None)
+        self.assertEqual(response.data["inbox_tag"], None)
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload(self, m):
-
-        m.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -804,23 +1609,23 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 {"document": f},
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        m.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = m.call_args
-        file_path = Path(args[0])
-        self.assertEqual(file_path.name, "simple.pdf")
-        self.assertIn(Path(settings.SCRATCH_DIR), file_path.parents)
-        self.assertIsNone(kwargs["override_title"])
-        self.assertIsNone(kwargs["override_correspondent_id"])
-        self.assertIsNone(kwargs["override_document_type_id"])
-        self.assertIsNone(kwargs["override_tag_ids"])
+        input_doc, overrides = self.get_last_consume_delay_call_args()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_empty_metadata(self, m):
+        self.assertEqual(input_doc.original_file.name, "simple.pdf")
+        self.assertIn(Path(settings.SCRATCH_DIR), input_doc.original_file.parents)
+        self.assertIsNone(overrides.title)
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.tag_ids)
 
-        m.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_empty_metadata(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -831,23 +1636,23 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 {"document": f, "title": "", "correspondent": "", "document_type": ""},
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        m.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = m.call_args
-        file_path = Path(args[0])
-        self.assertEqual(file_path.name, "simple.pdf")
-        self.assertIn(Path(settings.SCRATCH_DIR), file_path.parents)
-        self.assertIsNone(kwargs["override_title"])
-        self.assertIsNone(kwargs["override_correspondent_id"])
-        self.assertIsNone(kwargs["override_document_type_id"])
-        self.assertIsNone(kwargs["override_tag_ids"])
+        input_doc, overrides = self.get_last_consume_delay_call_args()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_invalid_form(self, m):
+        self.assertEqual(input_doc.original_file.name, "simple.pdf")
+        self.assertIn(Path(settings.SCRATCH_DIR), input_doc.original_file.parents)
+        self.assertIsNone(overrides.title)
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.tag_ids)
 
-        m.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_invalid_form(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -857,13 +1662,13 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"documenst": f},
             )
-        self.assertEqual(response.status_code, 400)
-        m.assert_not_called()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.consume_file_mock.assert_not_called()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_invalid_file(self, m):
-
-        m.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_invalid_file(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.zip"),
@@ -873,13 +1678,13 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f},
             )
-        self.assertEqual(response.status_code, 400)
-        m.assert_not_called()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.consume_file_mock.assert_not_called()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_title(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_title(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -889,18 +1694,21 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "title": "my custom title"},
             )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        async_task.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = async_task.call_args
+        _, overrides = self.get_last_consume_delay_call_args()
 
-        self.assertEqual(kwargs["override_title"], "my custom title")
+        self.assertEqual(overrides.title, "my custom title")
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.tag_ids)
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_correspondent(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_correspondent(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         c = Correspondent.objects.create(name="test-corres")
         with open(
@@ -911,18 +1719,21 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "correspondent": c.id},
             )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        async_task.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = async_task.call_args
+        _, overrides = self.get_last_consume_delay_call_args()
 
-        self.assertEqual(kwargs["override_correspondent_id"], c.id)
+        self.assertEqual(overrides.correspondent_id, c.id)
+        self.assertIsNone(overrides.title)
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.tag_ids)
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_invalid_correspondent(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_invalid_correspondent(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -932,14 +1743,14 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "correspondent": 3456},
             )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        async_task.assert_not_called()
+        self.consume_file_mock.assert_not_called()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_document_type(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_document_type(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         dt = DocumentType.objects.create(name="invoice")
         with open(
@@ -950,18 +1761,21 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "document_type": dt.id},
             )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        async_task.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = async_task.call_args
+        _, overrides = self.get_last_consume_delay_call_args()
 
-        self.assertEqual(kwargs["override_document_type_id"], dt.id)
+        self.assertEqual(overrides.document_type_id, dt.id)
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.title)
+        self.assertIsNone(overrides.tag_ids)
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_invalid_document_type(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_invalid_document_type(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         with open(
             os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
@@ -971,14 +1785,14 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "document_type": 34578},
             )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        async_task.assert_not_called()
+        self.consume_file_mock.assert_not_called()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_tags(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_tags(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         t1 = Tag.objects.create(name="tag1")
         t2 = Tag.objects.create(name="tag2")
@@ -990,18 +1804,21 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "tags": [t2.id, t1.id]},
             )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        async_task.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = async_task.call_args
+        _, overrides = self.get_last_consume_delay_call_args()
 
-        self.assertCountEqual(kwargs["override_tag_ids"], [t1.id, t2.id])
+        self.assertCountEqual(overrides.tag_ids, [t1.id, t2.id])
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.title)
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_invalid_tags(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_invalid_tags(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         t1 = Tag.objects.create(name="tag1")
         t2 = Tag.objects.create(name="tag2")
@@ -1013,14 +1830,14 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "tags": [t2.id, t1.id, 734563]},
             )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        async_task.assert_not_called()
+        self.consume_file_mock.assert_not_called()
 
-    @mock.patch("documents.views.consume_file.delay")
-    def test_upload_with_created(self, async_task):
-
-        async_task.return_value = celery.result.AsyncResult(id=str(uuid.uuid4()))
+    def test_upload_with_created(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
 
         created = datetime.datetime(
             2022,
@@ -1040,13 +1857,40 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 "/api/documents/post_document/",
                 {"document": f, "created": created},
             )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        async_task.assert_called_once()
+        self.consume_file_mock.assert_called_once()
 
-        args, kwargs = async_task.call_args
+        _, overrides = self.get_last_consume_delay_call_args()
 
-        self.assertEqual(kwargs["override_created"], created)
+        self.assertEqual(overrides.created, created)
+
+    def test_upload_with_asn(self):
+        self.consume_file_mock.return_value = celery.result.AsyncResult(
+            id=str(uuid.uuid4()),
+        )
+
+        with open(
+            os.path.join(os.path.dirname(__file__), "samples", "simple.pdf"),
+            "rb",
+        ) as f:
+            response = self.client.post(
+                "/api/documents/post_document/",
+                {"document": f, "archive_serial_number": 500},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.consume_file_mock.assert_called_once()
+
+        input_doc, overrides = self.get_last_consume_delay_call_args()
+
+        self.assertEqual(input_doc.original_file.name, "simple.pdf")
+        self.assertEqual(overrides.filename, "simple.pdf")
+        self.assertIsNone(overrides.correspondent_id)
+        self.assertIsNone(overrides.document_type_id)
+        self.assertIsNone(overrides.tag_ids)
+        self.assertEqual(500, overrides.asn)
 
     def test_get_metadata(self):
         doc = Document.objects.create(
@@ -1070,7 +1914,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         shutil.copy(archive_file, doc.archive_path)
 
         response = self.client.get(f"/api/documents/{doc.pk}/metadata/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         meta = response.data
 
@@ -1085,7 +1929,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
     def test_get_metadata_invalid_doc(self):
         response = self.client.get("/api/documents/34576/metadata/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_get_metadata_no_archive(self):
         doc = Document.objects.create(
@@ -1100,7 +1944,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get(f"/api/documents/{doc.pk}/metadata/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         meta = response.data
 
@@ -1121,7 +1965,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get(f"/api/documents/{doc.pk}/metadata/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         meta = response.data
 
@@ -1136,7 +1980,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         response = self.client.get(f"/api/documents/{doc.pk}/suggestions/")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             response.data,
             {
@@ -1150,7 +1994,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
     def test_get_suggestions_invalid_doc(self):
         response = self.client.get("/api/documents/34676/suggestions/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     @mock.patch("documents.views.match_storage_paths")
     @mock.patch("documents.views.match_document_types")
@@ -1187,26 +2031,49 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             },
         )
 
+    @mock.patch("documents.parsers.parse_date_generator")
+    @override_settings(NUMBER_OF_SUGGESTED_DATES=0)
+    def test_get_suggestions_dates_disabled(
+        self,
+        parse_date_generator,
+    ):
+        """
+        GIVEN:
+            - NUMBER_OF_SUGGESTED_DATES = 0 (disables feature)
+        WHEN:
+            - API reuqest for document suggestions
+        THEN:
+            - Dont check for suggested dates at all
+        """
+        doc = Document.objects.create(
+            title="test",
+            mime_type="application/pdf",
+            content="this is an invoice from 12.04.2022!",
+        )
+
+        self.client.get(f"/api/documents/{doc.pk}/suggestions/")
+        self.assertFalse(parse_date_generator.called)
+
     def test_saved_views(self):
-        u1 = User.objects.create_user("user1")
-        u2 = User.objects.create_user("user2")
+        u1 = User.objects.create_superuser("user1")
+        u2 = User.objects.create_superuser("user2")
 
         v1 = SavedView.objects.create(
-            user=u1,
+            owner=u1,
             name="test1",
             sort_field="",
             show_on_dashboard=False,
             show_in_sidebar=False,
         )
-        v2 = SavedView.objects.create(
-            user=u2,
+        SavedView.objects.create(
+            owner=u2,
             name="test2",
             sort_field="",
             show_on_dashboard=False,
             show_in_sidebar=False,
         )
-        v3 = SavedView.objects.create(
-            user=u2,
+        SavedView.objects.create(
+            owner=u2,
             name="test3",
             sort_field="",
             show_on_dashboard=False,
@@ -1214,30 +2081,38 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         response = self.client.get("/api/saved_views/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 0)
 
-        self.assertEqual(self.client.get(f"/api/saved_views/{v1.id}/").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/saved_views/{v1.id}/").status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
 
         self.client.force_authenticate(user=u1)
 
         response = self.client.get("/api/saved_views/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
 
-        self.assertEqual(self.client.get(f"/api/saved_views/{v1.id}/").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/saved_views/{v1.id}/").status_code,
+            status.HTTP_200_OK,
+        )
 
         self.client.force_authenticate(user=u2)
 
         response = self.client.get("/api/saved_views/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 2)
 
-        self.assertEqual(self.client.get(f"/api/saved_views/{v1.id}/").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/saved_views/{v1.id}/").status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
 
     def test_create_update_patch(self):
-
-        u1 = User.objects.create_user("user1")
+        User.objects.create_user("user1")
 
         view = {
             "name": "test",
@@ -1248,12 +2123,12 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         }
 
         response = self.client.post("/api/saved_views/", view, format="json")
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
         v1 = SavedView.objects.get(name="test")
         self.assertEqual(v1.sort_field, "created2")
         self.assertEqual(v1.filter_rules.count(), 1)
-        self.assertEqual(v1.user, self.user)
+        self.assertEqual(v1.owner, self.user)
 
         response = self.client.patch(
             f"/api/saved_views/{v1.id}/",
@@ -1262,14 +2137,14 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         )
 
         v1 = SavedView.objects.get(id=v1.id)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(v1.show_in_sidebar)
         self.assertEqual(v1.filter_rules.count(), 1)
 
         view["filter_rules"] = [{"rule_type": 12, "value": "secret"}]
 
         response = self.client.put(f"/api/saved_views/{v1.id}/", view, format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         v1 = SavedView.objects.get(id=v1.id)
         self.assertEqual(v1.filter_rules.count(), 1)
@@ -1278,31 +2153,44 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         view["filter_rules"] = []
 
         response = self.client.put(f"/api/saved_views/{v1.id}/", view, format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         v1 = SavedView.objects.get(id=v1.id)
         self.assertEqual(v1.filter_rules.count(), 0)
 
     def test_get_logs(self):
+        log_data = "test\ntest2\n"
+        with open(os.path.join(settings.LOGGING_DIR, "mail.log"), "w") as f:
+            f.write(log_data)
+        with open(os.path.join(settings.LOGGING_DIR, "paperless.log"), "w") as f:
+            f.write(log_data)
         response = self.client.get("/api/logs/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertCountEqual(response.data, ["mail", "paperless"])
+
+    def test_get_logs_only_when_exist(self):
+        log_data = "test\ntest2\n"
+        with open(os.path.join(settings.LOGGING_DIR, "paperless.log"), "w") as f:
+            f.write(log_data)
+        response = self.client.get("/api/logs/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertCountEqual(response.data, ["paperless"])
 
     def test_get_invalid_log(self):
         response = self.client.get("/api/logs/bogus_log/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     @override_settings(LOGGING_DIR="bogus_dir")
     def test_get_nonexistent_log(self):
         response = self.client.get("/api/logs/paperless/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_get_log(self):
         log_data = "test\ntest2\n"
         with open(os.path.join(settings.LOGGING_DIR, "paperless.log"), "w") as f:
             f.write(log_data)
         response = self.client.get("/api/logs/paperless/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertListEqual(response.data, ["test", "test2"])
 
     def test_invalid_regex_other_algorithm(self):
@@ -1316,7 +2204,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 },
                 format="json",
             )
-            self.assertEqual(response.status_code, 201, endpoint)
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, endpoint)
 
     def test_invalid_regex(self):
         for endpoint in ["correspondents", "tags", "document_types"]:
@@ -1329,7 +2217,11 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 },
                 format="json",
             )
-            self.assertEqual(response.status_code, 400, endpoint)
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_400_BAD_REQUEST,
+                endpoint,
+            )
 
     def test_valid_regex(self):
         for endpoint in ["correspondents", "tags", "document_types"]:
@@ -1342,7 +2234,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 },
                 format="json",
             )
-            self.assertEqual(response.status_code, 201, endpoint)
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, endpoint)
 
     def test_regex_no_algorithm(self):
         for endpoint in ["correspondents", "tags", "document_types"]:
@@ -1351,11 +2243,11 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
                 {"name": "test", "match": "[0-9]"},
                 format="json",
             )
-            self.assertEqual(response.status_code, 201, endpoint)
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, endpoint)
 
     def test_tag_color_default(self):
         response = self.client.post("/api/tags/", {"name": "tag"}, format="json")
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Tag.objects.get(id=response.data["id"]).color, "#a6cee3")
         self.assertEqual(
             self.client.get(f"/api/tags/{response.data['id']}/", format="json").data[
@@ -1370,7 +2262,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             {"name": "tag", "colour": 3},
             format="json",
         )
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Tag.objects.get(id=response.data["id"]).color, "#b2df8a")
         self.assertEqual(
             self.client.get(f"/api/tags/{response.data['id']}/", format="json").data[
@@ -1385,7 +2277,7 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             {"name": "tag", "colour": 34},
             format="json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_tag_color_custom(self):
         tag = Tag.objects.create(name="test", color="#abcdef")
@@ -1394,32 +2286,32 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
             1,
         )
 
-    def test_get_existing_comments(self):
+    def test_get_existing_notes(self):
         """
         GIVEN:
-            - A document with a single comment
+            - A document with a single note
         WHEN:
-            - API reuqest for document comments is made
+            - API reuqest for document notes is made
         THEN:
-            - The associated comment is returned
+            - The associated note is returned
         """
         doc = Document.objects.create(
             title="test",
             mime_type="application/pdf",
-            content="this is a document which will have comments!",
+            content="this is a document which will have notes!",
         )
-        comment = Comment.objects.create(
-            comment="This is a comment.",
+        note = Note.objects.create(
+            note="This is a note.",
             document=doc,
             user=self.user,
         )
 
         response = self.client.get(
-            f"/api/documents/{doc.pk}/comments/",
+            f"/api/documents/{doc.pk}/notes/",
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         resp_data = response.json()
 
@@ -1431,43 +2323,43 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
         self.assertDictEqual(
             resp_data,
             {
-                "id": comment.id,
-                "comment": comment.comment,
+                "id": note.id,
+                "note": note.note,
                 "user": {
-                    "id": comment.user.id,
-                    "username": comment.user.username,
-                    "firstname": comment.user.first_name,
-                    "lastname": comment.user.last_name,
+                    "id": note.user.id,
+                    "username": note.user.username,
+                    "first_name": note.user.first_name,
+                    "last_name": note.user.last_name,
                 },
             },
         )
 
-    def test_create_comment(self):
+    def test_create_note(self):
         """
         GIVEN:
             - Existing document
         WHEN:
-            - API request is made to add a comment
+            - API request is made to add a note
         THEN:
-            - Comment is created and associated with document
+            - note is created and associated with document
         """
         doc = Document.objects.create(
             title="test",
             mime_type="application/pdf",
-            content="this is a document which will have comments added",
+            content="this is a document which will have notes added",
         )
         resp = self.client.post(
-            f"/api/documents/{doc.pk}/comments/",
-            data={"comment": "this is a posted comment"},
+            f"/api/documents/{doc.pk}/notes/",
+            data={"note": "this is a posted note"},
         )
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
         response = self.client.get(
-            f"/api/documents/{doc.pk}/comments/",
+            f"/api/documents/{doc.pk}/notes/",
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         resp_data = response.json()
 
@@ -1475,51 +2367,145 @@ class TestDocumentApi(DirectoriesMixin, APITestCase):
 
         resp_data = resp_data[0]
 
-        self.assertEqual(resp_data["comment"], "this is a posted comment")
+        self.assertEqual(resp_data["note"], "this is a posted note")
 
-    def test_delete_comment(self):
+    def test_delete_note(self):
         """
         GIVEN:
             - Existing document
         WHEN:
-            - API request is made to add a comment
+            - API request is made to add a note
         THEN:
-            - Comment is created and associated with document
+            - note is created and associated with document
         """
         doc = Document.objects.create(
             title="test",
             mime_type="application/pdf",
-            content="this is a document which will have comments!",
+            content="this is a document which will have notes!",
         )
-        comment = Comment.objects.create(
-            comment="This is a comment.",
+        note = Note.objects.create(
+            note="This is a note.",
             document=doc,
             user=self.user,
         )
 
         response = self.client.delete(
-            f"/api/documents/{doc.pk}/comments/?id={comment.pk}",
+            f"/api/documents/{doc.pk}/notes/?id={note.pk}",
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        self.assertEqual(len(Comment.objects.all()), 0)
+        self.assertEqual(len(Note.objects.all()), 0)
 
-    def test_get_comments_no_doc(self):
+    def test_get_notes_no_doc(self):
         """
         GIVEN:
-            - A request to get comments from a non-existent document
+            - A request to get notes from a non-existent document
         WHEN:
-            - API request for document comments is made
+            - API request for document notes is made
         THEN:
-            - HTTP 404 is returned
+            - HTTP status.HTTP_404_NOT_FOUND is returned
         """
         response = self.client.get(
-            "/api/documents/500/comments/",
+            "/api/documents/500/notes/",
             format="json",
         )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_tag_unique_name_and_owner(self):
+        """
+        GIVEN:
+            - Multiple users
+            - Tags owned by particular users
+        WHEN:
+            - API request for creating items which are unique by name and owner
+        THEN:
+            - Unique items are created
+            - Non-unique items are not allowed
+        """
+        user1 = User.objects.create_user(username="test1")
+        user1.user_permissions.add(*Permission.objects.filter(codename="add_tag"))
+        user1.save()
+
+        user2 = User.objects.create_user(username="test2")
+        user2.user_permissions.add(*Permission.objects.filter(codename="add_tag"))
+        user2.save()
+
+        # User 1 creates tag 1 owned by user 1 by default
+        # No issue
+        self.client.force_authenticate(user1)
+        response = self.client.post("/api/tags/", {"name": "tag 1"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # User 2 creates tag 1 owned by user 2 by default
+        # No issue
+        self.client.force_authenticate(user2)
+        response = self.client.post("/api/tags/", {"name": "tag 1"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # User 2 creates tag 2 owned by user 1
+        # No issue
+        self.client.force_authenticate(user2)
+        response = self.client.post(
+            "/api/tags/",
+            {"name": "tag 2", "owner": user1.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # User 1 creates tag 2 owned by user 1 by default
+        # Not allowed, would create tag2/user1 which already exists
+        self.client.force_authenticate(user1)
+        response = self.client.post(
+            "/api/tags/",
+            {"name": "tag 2"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # User 1 creates tag 2 owned by user 1
+        # Not allowed, would create tag2/user1 which already exists
+        response = self.client.post(
+            "/api/tags/",
+            {"name": "tag 2", "owner": user1.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_tag_unique_name_and_owner_enforced_on_update(self):
+        """
+        GIVEN:
+            - Multiple users
+            - Tags owned by particular users
+        WHEN:
+            - API request for to update tag in such as way as makes it non-unqiue
+        THEN:
+            - Unique items are created
+            - Non-unique items are not allowed on update
+        """
+        user1 = User.objects.create_user(username="test1")
+        user1.user_permissions.add(*Permission.objects.filter(codename="change_tag"))
+        user1.save()
+
+        user2 = User.objects.create_user(username="test2")
+        user2.user_permissions.add(*Permission.objects.filter(codename="change_tag"))
+        user2.save()
+
+        # Create name tag 1 owned by user 1
+        # Create name tag 1 owned by user 2
+        Tag.objects.create(name="tag 1", owner=user1)
+        tag2 = Tag.objects.create(name="tag 1", owner=user2)
+
+        # User 2 attempts to change the owner of tag to user 1
+        # Not allowed, would change to tag1/user1 which already exists
+        self.client.force_authenticate(user2)
+        response = self.client.patch(
+            f"/api/tags/{tag2.id}/",
+            {"owner": user1.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class TestDocumentApiV2(DirectoriesMixin, APITestCase):
@@ -1538,7 +2524,7 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
                 {"name": "test", "color": "#12fFaA"},
                 format="json",
             ).status_code,
-            201,
+            status.HTTP_201_CREATED,
         )
 
         self.assertEqual(
@@ -1547,7 +2533,7 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
                 {"name": "test1", "color": "abcdef"},
                 format="json",
             ).status_code,
-            400,
+            status.HTTP_400_BAD_REQUEST,
         )
         self.assertEqual(
             self.client.post(
@@ -1555,7 +2541,7 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
                 {"name": "test2", "color": "#abcdfg"},
                 format="json",
             ).status_code,
-            400,
+            status.HTTP_400_BAD_REQUEST,
         )
         self.assertEqual(
             self.client.post(
@@ -1563,7 +2549,7 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
                 {"name": "test3", "color": "#asd"},
                 format="json",
             ).status_code,
-            400,
+            status.HTTP_400_BAD_REQUEST,
         )
         self.assertEqual(
             self.client.post(
@@ -1571,7 +2557,7 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
                 {"name": "test4", "color": "#12121212"},
                 format="json",
             ).status_code,
-            400,
+            status.HTTP_400_BAD_REQUEST,
         )
 
     def test_tag_text_color(self):
@@ -1604,17 +2590,30 @@ class TestDocumentApiV2(DirectoriesMixin, APITestCase):
 
 
 class TestApiUiSettings(DirectoriesMixin, APITestCase):
-
     ENDPOINT = "/api/ui_settings/"
 
     def setUp(self):
         super().setUp()
         self.test_user = User.objects.create_superuser(username="test")
+        self.test_user.first_name = "Test"
+        self.test_user.last_name = "User"
+        self.test_user.save()
         self.client.force_authenticate(user=self.test_user)
 
     def test_api_get_ui_settings(self):
         response = self.client.get(self.ENDPOINT, format="json")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertDictEqual(
+            response.data["user"],
+            {
+                "id": self.test_user.id,
+                "username": self.test_user.username,
+                "is_superuser": True,
+                "groups": [],
+                "first_name": self.test_user.first_name,
+                "last_name": self.test_user.last_name,
+            },
+        )
         self.assertDictEqual(
             response.data["settings"],
             {
@@ -1639,7 +2638,7 @@ class TestApiUiSettings(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         ui_settings = self.test_user.ui_settings
         self.assertDictEqual(
@@ -1836,7 +2835,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1856,7 +2855,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1876,7 +2875,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1896,7 +2895,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1916,7 +2915,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1936,7 +2935,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -1959,7 +2958,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertListEqual(args[0], [self.doc1.id, self.doc3.id])
@@ -1991,7 +2990,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         m.assert_not_called()
 
     @mock.patch("documents.serialisers.bulk_edit.delete")
@@ -2004,7 +3003,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
         self.assertEqual(args[0], [self.doc1.id])
@@ -2034,7 +3033,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
 
@@ -2065,7 +3064,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         m.assert_called_once()
         args, kwargs = m.call_args
 
@@ -2094,7 +3093,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.async_task.assert_not_called()
 
     def test_api_set_storage_path_not_provided(self):
@@ -2119,7 +3118,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.async_task.assert_not_called()
 
     def test_api_invalid_doc(self):
@@ -2129,7 +3128,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             json.dumps({"documents": [-235], "method": "delete", "parameters": {}}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(Document.objects.count(), 5)
 
     def test_api_invalid_method(self):
@@ -2145,7 +3144,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(Document.objects.count(), 5)
 
     def test_api_invalid_correspondent(self):
@@ -2161,7 +3160,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         doc2 = Document.objects.get(id=self.doc2.id)
         self.assertEqual(doc2.correspondent, self.c1)
@@ -2178,7 +3177,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_invalid_document_type(self):
         self.assertEqual(self.doc2.document_type, self.dt1)
@@ -2193,7 +3192,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         doc2 = Document.objects.get(id=self.doc2.id)
         self.assertEqual(doc2.document_type, self.dt1)
@@ -2210,7 +3209,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_add_invalid_tag(self):
         self.assertEqual(list(self.doc2.tags.all()), [self.t1])
@@ -2225,7 +3224,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         self.assertEqual(list(self.doc2.tags.all()), [self.t1])
 
@@ -2237,7 +3236,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_delete_invalid_tag(self):
         self.assertEqual(list(self.doc2.tags.all()), [self.t1])
@@ -2252,7 +3251,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         self.assertEqual(list(self.doc2.tags.all()), [self.t1])
 
@@ -2264,7 +3263,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_modify_invalid_tags(self):
         self.assertEqual(list(self.doc2.tags.all()), [self.t1])
@@ -2282,7 +3281,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_modify_tags_no_tags(self):
         response = self.client.post(
@@ -2296,7 +3295,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         response = self.client.post(
             "/api/documents/bulk_edit/",
@@ -2309,7 +3308,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_api_selection_data_empty(self):
         response = self.client.post(
@@ -2317,7 +3316,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             json.dumps({"documents": []}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         for field, Entity in [
             ("selected_correspondents", Correspondent),
             ("selected_tags", Tag),
@@ -2339,7 +3338,7 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         self.assertCountEqual(
             response.data["selected_correspondents"],
@@ -2363,9 +3362,43 @@ class TestBulkEdit(DirectoriesMixin, APITestCase):
             ],
         )
 
+    @mock.patch("documents.serialisers.bulk_edit.set_permissions")
+    def test_set_permissions(self, m):
+        m.return_value = "OK"
+        user1 = User.objects.create(username="user1")
+        user2 = User.objects.create(username="user2")
+        permissions = {
+            "view": {
+                "users": [user1.id, user2.id],
+                "groups": None,
+            },
+            "change": {
+                "users": [user1.id],
+                "groups": None,
+            },
+        }
+
+        response = self.client.post(
+            "/api/documents/bulk_edit/",
+            json.dumps(
+                {
+                    "documents": [self.doc2.id, self.doc3.id],
+                    "method": "set_permissions",
+                    "parameters": {"set_permissions": permissions},
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        m.assert_called_once()
+        args, kwargs = m.call_args
+        self.assertCountEqual(args[0], [self.doc2.id, self.doc3.id])
+        self.assertEqual(len(kwargs["set_permissions"]["view"]["users"]), 2)
+
 
 class TestBulkDownload(DirectoriesMixin, APITestCase):
-
     ENDPOINT = "/api/documents/bulk_download/"
 
     def setUp(self):
@@ -2425,7 +3458,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2446,7 +3479,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2467,7 +3500,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2501,7 +3534,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2517,7 +3550,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
                 self.assertEqual(f.read(), zipf.read("2021-01-01 document A_01.pdf"))
 
     def test_compression(self):
-        response = self.client.post(
+        self.client.post(
             self.ENDPOINT,
             json.dumps(
                 {"documents": [self.doc2.id, self.doc2b.id], "compression": "lzma"},
@@ -2560,7 +3593,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2608,7 +3641,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2657,7 +3690,7 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/zip")
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zipf:
@@ -2687,45 +3720,70 @@ class TestBulkDownload(DirectoriesMixin, APITestCase):
 
 class TestApiAuth(DirectoriesMixin, APITestCase):
     def test_auth_required(self):
-
         d = Document.objects.create(title="Test")
 
-        self.assertEqual(self.client.get("/api/documents/").status_code, 401)
+        self.assertEqual(
+            self.client.get("/api/documents/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
 
-        self.assertEqual(self.client.get(f"/api/documents/{d.id}/").status_code, 401)
+        self.assertEqual(
+            self.client.get(f"/api/documents/{d.id}/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
         self.assertEqual(
             self.client.get(f"/api/documents/{d.id}/download/").status_code,
-            401,
+            status.HTTP_401_UNAUTHORIZED,
         )
         self.assertEqual(
             self.client.get(f"/api/documents/{d.id}/preview/").status_code,
-            401,
+            status.HTTP_401_UNAUTHORIZED,
         )
         self.assertEqual(
             self.client.get(f"/api/documents/{d.id}/thumb/").status_code,
-            401,
+            status.HTTP_401_UNAUTHORIZED,
         )
 
-        self.assertEqual(self.client.get("/api/tags/").status_code, 401)
-        self.assertEqual(self.client.get("/api/correspondents/").status_code, 401)
-        self.assertEqual(self.client.get("/api/document_types/").status_code, 401)
+        self.assertEqual(
+            self.client.get("/api/tags/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            self.client.get("/api/correspondents/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            self.client.get("/api/document_types/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
 
-        self.assertEqual(self.client.get("/api/logs/").status_code, 401)
-        self.assertEqual(self.client.get("/api/saved_views/").status_code, 401)
+        self.assertEqual(
+            self.client.get("/api/logs/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            self.client.get("/api/saved_views/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
 
-        self.assertEqual(self.client.get("/api/search/autocomplete/").status_code, 401)
-        self.assertEqual(self.client.get("/api/documents/bulk_edit/").status_code, 401)
+        self.assertEqual(
+            self.client.get("/api/search/autocomplete/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            self.client.get("/api/documents/bulk_edit/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
         self.assertEqual(
             self.client.get("/api/documents/bulk_download/").status_code,
-            401,
+            status.HTTP_401_UNAUTHORIZED,
         )
         self.assertEqual(
             self.client.get("/api/documents/selection_data/").status_code,
-            401,
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     def test_api_version_no_auth(self):
-
         response = self.client.get("/api/")
         self.assertNotIn("X-Api-Version", response)
         self.assertNotIn("X-Version", response)
@@ -2737,6 +3795,308 @@ class TestApiAuth(DirectoriesMixin, APITestCase):
         self.assertIn("X-Api-Version", response)
         self.assertIn("X-Version", response)
 
+    def test_api_insufficient_permissions(self):
+        user = User.objects.create_user(username="test")
+        self.client.force_authenticate(user)
+
+        Document.objects.create(title="Test")
+
+        self.assertEqual(
+            self.client.get("/api/documents/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.assertEqual(
+            self.client.get("/api/tags/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            self.client.get("/api/correspondents/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            self.client.get("/api/document_types/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.assertEqual(
+            self.client.get("/api/logs/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            self.client.get("/api/saved_views/").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_api_sufficient_permissions(self):
+        user = User.objects.create_user(username="test")
+        user.user_permissions.add(*Permission.objects.all())
+        self.client.force_authenticate(user)
+
+        Document.objects.create(title="Test")
+
+        self.assertEqual(
+            self.client.get("/api/documents/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(self.client.get("/api/tags/").status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self.client.get("/api/correspondents/").status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            self.client.get("/api/document_types/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(self.client.get("/api/logs/").status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self.client.get("/api/saved_views/").status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_api_get_object_permissions(self):
+        user1 = User.objects.create_user(username="test1")
+        user2 = User.objects.create_user(username="test2")
+        user1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        self.client.force_authenticate(user1)
+
+        self.assertEqual(
+            self.client.get("/api/documents/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        d = Document.objects.create(title="Test", content="the content 1", checksum="1")
+
+        # no owner
+        self.assertEqual(
+            self.client.get(f"/api/documents/{d.id}/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        d2 = Document.objects.create(
+            title="Test 2",
+            content="the content 2",
+            checksum="2",
+            owner=user2,
+        )
+
+        self.assertEqual(
+            self.client.get(f"/api/documents/{d2.id}/").status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_api_default_owner(self):
+        """
+        GIVEN:
+            - API request to create an object (Tag)
+        WHEN:
+            - owner is not set at all
+        THEN:
+            - Object created with current user as owner
+        """
+        user1 = User.objects.create_superuser(username="user1")
+
+        self.client.force_authenticate(user1)
+
+        response = self.client.post(
+            "/api/tags/",
+            json.dumps(
+                {
+                    "name": "test1",
+                    "matching_algorithm": MatchingModel.MATCH_AUTO,
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        tag1 = Tag.objects.filter(name="test1").first()
+        self.assertEqual(tag1.owner, user1)
+
+    def test_api_set_no_owner(self):
+        """
+        GIVEN:
+            - API request to create an object (Tag)
+        WHEN:
+            - owner is passed as None
+        THEN:
+            - Object created with no owner
+        """
+        user1 = User.objects.create_superuser(username="user1")
+
+        self.client.force_authenticate(user1)
+
+        response = self.client.post(
+            "/api/tags/",
+            json.dumps(
+                {
+                    "name": "test1",
+                    "matching_algorithm": MatchingModel.MATCH_AUTO,
+                    "owner": None,
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        tag1 = Tag.objects.filter(name="test1").first()
+        self.assertEqual(tag1.owner, None)
+
+    def test_api_set_owner_w_permissions(self):
+        """
+        GIVEN:
+            - API request to create an object (Tag) that supplies set_permissions object
+        WHEN:
+            - owner is passed as user id
+            - view > users is set & view > groups is set
+        THEN:
+            - Object permissions are set appropriately
+        """
+        user1 = User.objects.create_superuser(username="user1")
+        user2 = User.objects.create(username="user2")
+        group1 = Group.objects.create(name="group1")
+
+        self.client.force_authenticate(user1)
+
+        response = self.client.post(
+            "/api/tags/",
+            json.dumps(
+                {
+                    "name": "test1",
+                    "matching_algorithm": MatchingModel.MATCH_AUTO,
+                    "owner": user1.id,
+                    "set_permissions": {
+                        "view": {
+                            "users": [user2.id],
+                            "groups": [group1.id],
+                        },
+                        "change": {
+                            "users": None,
+                            "groups": None,
+                        },
+                    },
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        tag1 = Tag.objects.filter(name="test1").first()
+
+        from guardian.core import ObjectPermissionChecker
+
+        checker = ObjectPermissionChecker(user2)
+        self.assertEqual(checker.has_perm("view_tag", tag1), True)
+        self.assertIn("view_tag", get_perms(group1, tag1))
+
+    def test_api_set_doc_permissions(self):
+        """
+        GIVEN:
+            - API request to update doc permissions and owner
+        WHEN:
+            - owner is set
+            - view > users is set & view > groups is set
+        THEN:
+            - Object permissions are set appropriately
+        """
+        doc = Document.objects.create(
+            title="test",
+            mime_type="application/pdf",
+            content="this is a document",
+        )
+        user1 = User.objects.create_superuser(username="user1")
+        user2 = User.objects.create(username="user2")
+        group1 = Group.objects.create(name="group1")
+
+        self.client.force_authenticate(user1)
+
+        response = self.client.patch(
+            f"/api/documents/{doc.id}/",
+            json.dumps(
+                {
+                    "owner": user1.id,
+                    "set_permissions": {
+                        "view": {
+                            "users": [user2.id],
+                            "groups": [group1.id],
+                        },
+                        "change": {
+                            "users": None,
+                            "groups": None,
+                        },
+                    },
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        doc = Document.objects.get(pk=doc.id)
+
+        self.assertEqual(doc.owner, user1)
+        from guardian.core import ObjectPermissionChecker
+
+        checker = ObjectPermissionChecker(user2)
+        self.assertTrue(checker.has_perm("view_document", doc))
+        self.assertIn("view_document", get_perms(group1, doc))
+
+    def test_dynamic_permissions_fields(self):
+        user1 = User.objects.create_user(username="user1")
+        user1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
+        user2 = User.objects.create_user(username="user2")
+
+        Document.objects.create(title="Test", content="content 1", checksum="1")
+        doc2 = Document.objects.create(
+            title="Test2",
+            content="content 2",
+            checksum="2",
+            owner=user2,
+        )
+        doc3 = Document.objects.create(
+            title="Test3",
+            content="content 3",
+            checksum="3",
+            owner=user2,
+        )
+
+        assign_perm("view_document", user1, doc2)
+        assign_perm("view_document", user1, doc3)
+        assign_perm("change_document", user1, doc3)
+
+        self.client.force_authenticate(user1)
+
+        response = self.client.get(
+            "/api/documents/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        resp_data = response.json()
+
+        self.assertNotIn("permissions", resp_data["results"][0])
+        self.assertIn("user_can_change", resp_data["results"][0])
+        self.assertEqual(resp_data["results"][0]["user_can_change"], True)  # doc1
+        self.assertEqual(resp_data["results"][1]["user_can_change"], False)  # doc2
+        self.assertEqual(resp_data["results"][2]["user_can_change"], True)  # doc3
+
+        response = self.client.get(
+            "/api/documents/?full_perms=true",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        resp_data = response.json()
+
+        self.assertIn("permissions", resp_data["results"][0])
+        self.assertNotIn("user_can_change", resp_data["results"][0])
+
 
 class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
     ENDPOINT = "/api/remote_version/"
@@ -2746,16 +4106,15 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
     @mock.patch("urllib.request.urlopen")
     def test_remote_version_enabled_no_update_prefix(self, urlopen_mock):
-
         cm = MagicMock()
-        cm.getcode.return_value = 200
+        cm.getcode.return_value = status.HTTP_200_OK
         cm.read.return_value = json.dumps({"tag_name": "ngx-1.6.0"}).encode()
         cm.__enter__.return_value = cm
         urlopen_mock.return_value = cm
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertDictEqual(
             response.data,
             {
@@ -2766,9 +4125,8 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
     @mock.patch("urllib.request.urlopen")
     def test_remote_version_enabled_no_update_no_prefix(self, urlopen_mock):
-
         cm = MagicMock()
-        cm.getcode.return_value = 200
+        cm.getcode.return_value = status.HTTP_200_OK
         cm.read.return_value = json.dumps(
             {"tag_name": version.__full_version_str__},
         ).encode()
@@ -2777,7 +4135,7 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertDictEqual(
             response.data,
             {
@@ -2788,7 +4146,6 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
     @mock.patch("urllib.request.urlopen")
     def test_remote_version_enabled_update(self, urlopen_mock):
-
         new_version = (
             version.__version__[0],
             version.__version__[1],
@@ -2797,7 +4154,7 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
         new_version_str = ".".join(map(str, new_version))
 
         cm = MagicMock()
-        cm.getcode.return_value = 200
+        cm.getcode.return_value = status.HTTP_200_OK
         cm.read.return_value = json.dumps(
             {"tag_name": new_version_str},
         ).encode()
@@ -2806,7 +4163,7 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertDictEqual(
             response.data,
             {
@@ -2817,16 +4174,15 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
     @mock.patch("urllib.request.urlopen")
     def test_remote_version_bad_json(self, urlopen_mock):
-
         cm = MagicMock()
-        cm.getcode.return_value = 200
+        cm.getcode.return_value = status.HTTP_200_OK
         cm.read.return_value = b'{ "blah":'
         cm.__enter__.return_value = cm
         urlopen_mock.return_value = cm
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertDictEqual(
             response.data,
             {
@@ -2837,16 +4193,15 @@ class TestApiRemoteVersion(DirectoriesMixin, APITestCase):
 
     @mock.patch("urllib.request.urlopen")
     def test_remote_version_exception(self, urlopen_mock):
-
         cm = MagicMock()
-        cm.getcode.return_value = 200
+        cm.getcode.return_value = status.HTTP_200_OK
         cm.read.side_effect = urllib.error.URLError("an error")
         cm.__enter__.return_value = cm
         urlopen_mock.return_value = cm
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertDictEqual(
             response.data,
             {
@@ -2862,7 +4217,7 @@ class TestApiStoragePaths(DirectoriesMixin, APITestCase):
     def setUp(self) -> None:
         super().setUp()
 
-        user = User.objects.create(username="temp_admin")
+        user = User.objects.create_superuser(username="temp_admin")
         self.client.force_authenticate(user=user)
 
         self.sp1 = StoragePath.objects.create(name="sp1", path="Something/{checksum}")
@@ -2877,9 +4232,8 @@ class TestApiStoragePaths(DirectoriesMixin, APITestCase):
             - Existing storage paths are returned
         """
         response = self.client.get(self.ENDPOINT, format="json")
-        self.assertEqual(response.status_code, 200)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
 
         resp_storage_path = response.data["results"][0]
@@ -2906,7 +4260,7 @@ class TestApiStoragePaths(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(StoragePath.objects.count(), 2)
 
     def test_api_create_invalid_storage_path(self):
@@ -2930,11 +4284,69 @@ class TestApiStoragePaths(DirectoriesMixin, APITestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(StoragePath.objects.count(), 1)
 
+    def test_api_storage_path_placeholders(self):
+        """
+        GIVEN:
+            - API request to create a storage path with placeholders
+            - Storage path is valid
+        WHEN:
+            - API is called
+        THEN:
+            - Correct HTTP response
+            - New storage path is created
+        """
+        response = self.client.post(
+            self.ENDPOINT,
+            json.dumps(
+                {
+                    "name": "Storage path with placeholders",
+                    "path": "{title}/{correspondent}/{document_type}/{created}/{created_year}"
+                    "/{created_year_short}/{created_month}/{created_month_name}"
+                    "/{created_month_name_short}/{created_day}/{added}/{added_year}"
+                    "/{added_year_short}/{added_month}/{added_month_name}"
+                    "/{added_month_name_short}/{added_day}/{asn}/{tags}"
+                    "/{tag_list}/",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(StoragePath.objects.count(), 2)
 
-class TestTasks(APITestCase):
+    @mock.patch("documents.bulk_edit.bulk_update_documents.delay")
+    def test_api_update_storage_path(self, bulk_update_mock):
+        """
+        GIVEN:
+            - API request to get all storage paths
+        WHEN:
+            - API is called
+        THEN:
+            - Existing storage paths are returned
+        """
+        document = Document.objects.create(
+            mime_type="application/pdf",
+            storage_path=self.sp1,
+        )
+        response = self.client.patch(
+            f"{self.ENDPOINT}{self.sp1.pk}/",
+            data={
+                "path": "somewhere/{created} - {title}",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        bulk_update_mock.assert_called_once()
+
+        args, _ = bulk_update_mock.call_args
+
+        self.assertCountEqual([document.pk], args[0])
+
+
+class TestTasks(DirectoriesMixin, APITestCase):
     ENDPOINT = "/api/tasks/"
     ENDPOINT_ACKNOWLEDGE = "/api/acknowledge_tasks/"
 
@@ -2966,15 +4378,10 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
         returned_task1 = response.data[1]
         returned_task2 = response.data[0]
-
-        from pprint import pprint
-
-        pprint(returned_task1)
-        pprint(returned_task2)
 
         self.assertEqual(returned_task1["task_id"], task1.task_id)
         self.assertEqual(returned_task1["status"], celery.states.PENDING)
@@ -3007,7 +4414,7 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT + f"?task_id={id1}")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         returned_task1 = response.data[0]
 
@@ -3022,7 +4429,7 @@ class TestTasks(APITestCase):
         THEN:
             - No task data is returned
         """
-        task1 = PaperlessTask.objects.create(
+        PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="task_one.pdf",
         )
@@ -3034,7 +4441,7 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT + "?task_id=bad-task-id")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 0)
 
     def test_acknowledge_tasks(self):
@@ -3058,7 +4465,7 @@ class TestTasks(APITestCase):
             self.ENDPOINT_ACKNOWLEDGE,
             {"tasks": [task.id]},
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         response = self.client.get(self.ENDPOINT)
         self.assertEqual(len(response.data), 0)
@@ -3072,7 +4479,7 @@ class TestTasks(APITestCase):
         THEN:
             - The returned data includes the task result
         """
-        task = PaperlessTask.objects.create(
+        PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="task_one.pdf",
             status=celery.states.SUCCESS,
@@ -3081,7 +4488,7 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
         returned_data = response.data[0]
@@ -3098,7 +4505,7 @@ class TestTasks(APITestCase):
         THEN:
             - The returned result is the exception info
         """
-        task = PaperlessTask.objects.create(
+        PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="task_one.pdf",
             status=celery.states.FAILURE,
@@ -3107,7 +4514,7 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
         returned_data = response.data[0]
@@ -3127,7 +4534,7 @@ class TestTasks(APITestCase):
         THEN:
             - Returned data include the filename
         """
-        task = PaperlessTask.objects.create(
+        PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="test.pdf",
             task_name="documents.tasks.some_task",
@@ -3136,7 +4543,7 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
         returned_data = response.data[0]
@@ -3153,7 +4560,7 @@ class TestTasks(APITestCase):
         THEN:
             - Returned data include the filename
         """
-        task = PaperlessTask.objects.create(
+        PaperlessTask.objects.create(
             task_id=str(uuid.uuid4()),
             task_file_name="anothertest.pdf",
             task_name="documents.tasks.some_task",
@@ -3162,9 +4569,252 @@ class TestTasks(APITestCase):
 
         response = self.client.get(self.ENDPOINT)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
         returned_data = response.data[0]
 
         self.assertEqual(returned_data["task_file_name"], "anothertest.pdf")
+
+
+class TestApiUser(DirectoriesMixin, APITestCase):
+    ENDPOINT = "/api/users/"
+
+    def setUp(self):
+        super().setUp()
+
+        self.user = User.objects.create_superuser(username="temp_admin")
+        self.client.force_authenticate(user=self.user)
+
+    def test_get_users(self):
+        """
+        GIVEN:
+            - Configured users
+        WHEN:
+            - API call is made to get users
+        THEN:
+            - Configured users are provided
+        """
+
+        user1 = User.objects.create(
+            username="testuser",
+            password="test",
+            first_name="Test",
+            last_name="User",
+        )
+
+        response = self.client.get(self.ENDPOINT)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        returned_user2 = response.data["results"][1]
+
+        self.assertEqual(returned_user2["username"], user1.username)
+        self.assertEqual(returned_user2["password"], "**********")
+        self.assertEqual(returned_user2["first_name"], user1.first_name)
+        self.assertEqual(returned_user2["last_name"], user1.last_name)
+
+    def test_create_user(self):
+        """
+        WHEN:
+            - API request is made to add a user account
+        THEN:
+            - A new user account is created
+        """
+
+        user1 = {
+            "username": "testuser",
+            "password": "test",
+            "first_name": "Test",
+            "last_name": "User",
+        }
+
+        response = self.client.post(
+            self.ENDPOINT,
+            data=user1,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        returned_user1 = User.objects.get(username="testuser")
+
+        self.assertEqual(returned_user1.username, user1["username"])
+        self.assertEqual(returned_user1.first_name, user1["first_name"])
+        self.assertEqual(returned_user1.last_name, user1["last_name"])
+
+    def test_delete_user(self):
+        """
+        GIVEN:
+            - Existing user account
+        WHEN:
+            - API request is made to delete a user account
+        THEN:
+            - Account is deleted
+        """
+
+        user1 = User.objects.create(
+            username="testuser",
+            password="test",
+            first_name="Test",
+            last_name="User",
+        )
+
+        nUsers = User.objects.count()
+
+        response = self.client.delete(
+            f"{self.ENDPOINT}{user1.pk}/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertEqual(User.objects.count(), nUsers - 1)
+
+    def test_update_user(self):
+        """
+        GIVEN:
+            - Existing user accounts
+        WHEN:
+            - API request is made to update user account
+        THEN:
+            - The user account is updated, password only updated if not '****'
+        """
+
+        user1 = User.objects.create(
+            username="testuser",
+            password="test",
+            first_name="Test",
+            last_name="User",
+        )
+
+        initial_password = user1.password
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}{user1.pk}/",
+            data={
+                "first_name": "Updated Name 1",
+                "password": "******",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        returned_user1 = User.objects.get(pk=user1.pk)
+        self.assertEqual(returned_user1.first_name, "Updated Name 1")
+        self.assertEqual(returned_user1.password, initial_password)
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}{user1.pk}/",
+            data={
+                "first_name": "Updated Name 2",
+                "password": "123xyz",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        returned_user2 = User.objects.get(pk=user1.pk)
+        self.assertEqual(returned_user2.first_name, "Updated Name 2")
+        self.assertNotEqual(returned_user2.password, initial_password)
+
+
+class TestApiGroup(DirectoriesMixin, APITestCase):
+    ENDPOINT = "/api/groups/"
+
+    def setUp(self):
+        super().setUp()
+
+        self.user = User.objects.create_superuser(username="temp_admin")
+        self.client.force_authenticate(user=self.user)
+
+    def test_get_groups(self):
+        """
+        GIVEN:
+            - Configured groups
+        WHEN:
+            - API call is made to get groups
+        THEN:
+            - Configured groups are provided
+        """
+
+        group1 = Group.objects.create(
+            name="Test Group",
+        )
+
+        response = self.client.get(self.ENDPOINT)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        returned_group1 = response.data["results"][0]
+
+        self.assertEqual(returned_group1["name"], group1.name)
+
+    def test_create_group(self):
+        """
+        WHEN:
+            - API request is made to add a group
+        THEN:
+            - A new group is created
+        """
+
+        group1 = {
+            "name": "Test Group",
+        }
+
+        response = self.client.post(
+            self.ENDPOINT,
+            data=group1,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        returned_group1 = Group.objects.get(name="Test Group")
+
+        self.assertEqual(returned_group1.name, group1["name"])
+
+    def test_delete_group(self):
+        """
+        GIVEN:
+            - Existing group
+        WHEN:
+            - API request is made to delete a group
+        THEN:
+            - Group is deleted
+        """
+
+        group1 = Group.objects.create(
+            name="Test Group",
+        )
+
+        response = self.client.delete(
+            f"{self.ENDPOINT}{group1.pk}/",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertEqual(len(Group.objects.all()), 0)
+
+    def test_update_group(self):
+        """
+        GIVEN:
+            - Existing groups
+        WHEN:
+            - API request is made to update group
+        THEN:
+            - The group is updated
+        """
+
+        group1 = Group.objects.create(
+            name="Test Group",
+        )
+
+        response = self.client.patch(
+            f"{self.ENDPOINT}{group1.pk}/",
+            data={
+                "name": "Updated Name 1",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        returned_group1 = Group.objects.get(pk=group1.pk)
+        self.assertEqual(returned_group1.name, "Updated Name 1")

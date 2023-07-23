@@ -18,6 +18,8 @@ import { CorrespondentService } from 'src/app/services/rest/correspondent.servic
 import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
 import { MailAccountService } from 'src/app/services/rest/mail-account.service'
 import { MailRuleService } from 'src/app/services/rest/mail-rule.service'
+import { UserService } from 'src/app/services/rest/user.service'
+import { SettingsService } from 'src/app/services/settings.service'
 
 const ATTACHMENT_TYPE_OPTIONS = [
   {
@@ -113,9 +115,11 @@ export class MailRuleEditDialogComponent extends EditDialogComponent<PaperlessMa
     activeModal: NgbActiveModal,
     accountService: MailAccountService,
     correspondentService: CorrespondentService,
-    documentTypeService: DocumentTypeService
+    documentTypeService: DocumentTypeService,
+    userService: UserService,
+    settingsService: SettingsService
   ) {
-    super(service, activeModal)
+    super(service, activeModal, userService, settingsService)
 
     accountService
       .listAll()
@@ -147,6 +151,7 @@ export class MailRuleEditDialogComponent extends EditDialogComponent<PaperlessMa
       account: new FormControl(null),
       folder: new FormControl('INBOX'),
       filter_from: new FormControl(null),
+      filter_to: new FormControl(null),
       filter_subject: new FormControl(null),
       filter_body: new FormControl(null),
       filter_attachment_filename: new FormControl(null),

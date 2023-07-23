@@ -1,28 +1,25 @@
 import logging
-import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
+from subprocess import run
+from typing import Dict
+from typing import Final
 from typing import List
 from typing import Optional
 
-import magic
+import img2pdf
 from django.conf import settings
 from pdf2image import convert_from_path
 from pdf2image.exceptions import PDFPageCountError
 from pikepdf import Page
 from pikepdf import Pdf
 from PIL import Image
-from PIL import ImageSequence
-from pyzbar import pyzbar
+
+from documents.data_models import DocumentSource
 
 logger = logging.getLogger("paperless.barcodes")
-
-
-class BarcodeImageFormatError(Exception):
-    pass
 
 
 @dataclass(frozen=True)
@@ -51,136 +48,181 @@ class Barcode:
         return self.value.startswith(settings.CONSUMER_ASN_BARCODE_PREFIX)
 
 
-@dataclass
-class DocumentBarcodeInfo:
-    """
-    Describes a single document's barcode status
-    """
+class BarcodeReader:
+    def __init__(self, filepath: Path, mime_type: str) -> None:
+        self.file: Final[Path] = filepath
+        self.mime: Final[str] = mime_type
+        self.pdf_file: Path = self.file
+        self.barcodes: List[Barcode] = []
+        self.temp_dir: Optional[Path] = None
 
-    pdf_path: Path
-    barcodes: List[Barcode]
+        if settings.CONSUMER_BARCODE_TIFF_SUPPORT:
+            self.SUPPORTED_FILE_MIMES = {"application/pdf", "image/tiff"}
+        else:
+            self.SUPPORTED_FILE_MIMES = {"application/pdf"}
 
+    def __enter__(self):
+        if self.supported_mime_type:
+            self.temp_dir = tempfile.TemporaryDirectory(prefix="paperless-barcodes")
+        return self
 
-@lru_cache(maxsize=8)
-def supported_file_type(mime_type) -> bool:
-    """
-    Determines if the file is valid for barcode
-    processing, based on MIME type and settings
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.temp_dir is not None:
+            self.temp_dir.cleanup()
+            self.temp_dir = None
 
-    :return: True if the file is supported, False otherwise
-    """
-    supported_mime = ["application/pdf"]
-    if settings.CONSUMER_BARCODE_TIFF_SUPPORT:
-        supported_mime += ["image/tiff"]
+    @property
+    def supported_mime_type(self) -> bool:
+        """
+        Return True if the given mime type is supported for barcodes, false otherwise
+        """
+        return self.mime in self.SUPPORTED_FILE_MIMES
 
-    return mime_type in supported_mime
+    @property
+    def asn(self) -> Optional[int]:
+        """
+        Search the parsed barcodes for any ASNs.
+        The first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
+        is considered the ASN to be used.
+        Returns the detected ASN (or None)
+        """
+        asn = None
 
+        # Ensure the barcodes have been read
+        self.detect()
 
-def barcode_reader(image: Image) -> List[str]:
-    """
-    Read any barcodes contained in image
-    Returns a list containing all found barcodes
-    """
-    barcodes = []
-    # Decode the barcode image
-    detected_barcodes = pyzbar.decode(image)
+        # get the first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
+        asn_text = next(
+            (x.value for x in self.barcodes if x.is_asn),
+            None,
+        )
 
-    if detected_barcodes:
+        if asn_text:
+            logger.debug(f"Found ASN Barcode: {asn_text}")
+            # remove the prefix and remove whitespace
+            asn_text = asn_text[len(settings.CONSUMER_ASN_BARCODE_PREFIX) :].strip()
+
+            # now, try parsing the ASN number
+            try:
+                asn = int(asn_text)
+            except ValueError as e:
+                logger.warning(f"Failed to parse ASN number because: {e}")
+
+        return asn
+
+    @staticmethod
+    def read_barcodes_zxing(image: Image) -> List[str]:
+        barcodes = []
+
+        import zxingcpp
+
+        detected_barcodes = zxingcpp.read_barcodes(image)
+        for barcode in detected_barcodes:
+            if barcode.text:
+                barcodes.append(barcode.text)
+                logger.debug(
+                    f"Barcode of type {barcode.format} found: {barcode.text}",
+                )
+
+        return barcodes
+
+    @staticmethod
+    def read_barcodes_pyzbar(image: Image) -> List[str]:
+        barcodes = []
+
+        from pyzbar import pyzbar
+
+        # Decode the barcode image
+        detected_barcodes = pyzbar.decode(image)
+
         # Traverse through all the detected barcodes in image
         for barcode in detected_barcodes:
             if barcode.data:
                 decoded_barcode = barcode.data.decode("utf-8")
                 barcodes.append(decoded_barcode)
                 logger.debug(
-                    f"Barcode of type {str(barcode.type)} found: {decoded_barcode}",
+                    f"Barcode of type {barcode.type} found: {decoded_barcode}",
                 )
-    return barcodes
 
+        return barcodes
 
-def get_file_mime_type(path: str) -> str:
-    """
-    Determines the file type, based on MIME type.
+    def convert_from_tiff_to_pdf(self):
+        """
+        May convert a TIFF image into a PDF, if the input is a TIFF
+        """
+        # Nothing to do, pdf_file is already assigned correctly
+        if self.mime != "image/tiff":
+            return
 
-    Returns the MIME type.
-    """
-    mime_type = magic.from_file(path, mime=True)
-    logger.debug(f"Detected mime type: {mime_type}")
-    return mime_type
+        with Image.open(self.file) as im:
+            has_alpha_layer = im.mode in ("RGBA", "LA")
+        if has_alpha_layer:
+            # Note the save into the temp folder, so as not to trigger a new
+            # consume
+            scratch_image = Path(self.temp_dir.name) / Path(self.file.name)
+            run(
+                [
+                    settings.CONVERT_BINARY,
+                    "-alpha",
+                    "off",
+                    self.file,
+                    scratch_image,
+                ],
+            )
+        else:
+            # Not modifying the original, safe to use in place
+            scratch_image = self.file
 
-
-def convert_from_tiff_to_pdf(filepath: str) -> str:
-    """
-    converts a given TIFF image file to pdf into a temporary directory.
-
-    Returns the new pdf file.
-    """
-    file_name = os.path.splitext(os.path.basename(filepath))[0]
-    mime_type = get_file_mime_type(filepath)
-    tempdir = tempfile.mkdtemp(prefix="paperless-", dir=settings.SCRATCH_DIR)
-    # use old file name with pdf extension
-    if mime_type == "image/tiff":
-        newpath = os.path.join(tempdir, file_name + ".pdf")
-    else:
-        logger.warning(
-            f"Cannot convert mime type {str(mime_type)} from {str(filepath)} to pdf.",
+        self.pdf_file = Path(self.temp_dir.name) / Path(self.file.name).with_suffix(
+            ".pdf",
         )
-        return None
-    with Image.open(filepath) as image:
-        images = []
-        for i, page in enumerate(ImageSequence.Iterator(image)):
-            page = page.convert("RGB")
-            images.append(page)
+
+        with scratch_image.open("rb") as img_file, self.pdf_file.open("wb") as pdf_file:
+            pdf_file.write(img2pdf.convert(img_file))
+
+        # Copy what file stat is possible
+        shutil.copystat(self.file, self.pdf_file)
+
+    def detect(self) -> None:
+        """
+        Scan all pages of the PDF as images, updating barcodes and the pages
+        found on as we go
+        """
+        # Bail if barcodes already exist
+        if self.barcodes:
+            return
+
+        # Choose the library for reading
+        if settings.CONSUMER_BARCODE_SCANNER == "PYZBAR":
+            reader = self.read_barcodes_pyzbar
+            logger.debug("Scanning for barcodes using PYZBAR")
+        else:
+            reader = self.read_barcodes_zxing
+            logger.debug("Scanning for barcodes using ZXING")
+
         try:
-            if len(images) == 1:
-                images[0].save(newpath)
-            else:
-                images[0].save(newpath, save_all=True, append_images=images[1:])
-        except OSError as e:  # pragma: no cover
-            logger.warning(
-                f"Could not save the file as pdf. Error: {str(e)}",
-            )
-            return None
-    return newpath
-
-
-def scan_file_for_barcodes(
-    filepath: str,
-) -> DocumentBarcodeInfo:
-    """
-    Scan the provided pdf file for any barcodes
-    Returns a PDF filepath and a list of
-    (page_number, barcode_text) tuples
-    """
-
-    def _pdf2image_barcode_scan(pdf_filepath: str) -> List[Barcode]:
-        detected_barcodes = []
-        # use a temporary directory in case the file is too big to handle in memory
-        with tempfile.TemporaryDirectory() as path:
             pages_from_path = convert_from_path(
-                pdf_filepath,
-                dpi=300,
-                output_folder=path,
+                self.pdf_file,
+                dpi=settings.CONSUMER_BARCODE_DPI,
+                output_folder=self.temp_dir.name,
             )
+
             for current_page_number, page in enumerate(pages_from_path):
-                for barcode_value in barcode_reader(page):
-                    detected_barcodes.append(
+                factor = settings.CONSUMER_BARCODE_UPSCALE
+                if factor > 1.0:
+                    logger.debug(
+                        f"Upscaling image by {factor} for better barcode detection",
+                    )
+                    x, y = page.size
+                    page = page.resize(
+                        (int(round(x * factor)), (int(round(y * factor)))),
+                    )
+
+                for barcode_value in reader(page):
+                    self.barcodes.append(
                         Barcode(current_page_number, barcode_value),
                     )
-        return detected_barcodes
 
-    pdf_filepath = None
-    mime_type = get_file_mime_type(filepath)
-    barcodes = []
-
-    if supported_file_type(mime_type):
-        pdf_filepath = filepath
-        if mime_type == "image/tiff":
-            pdf_filepath = convert_from_tiff_to_pdf(filepath)
-
-        # Always try pikepdf first, it's usually fine, faster and
-        # uses less memory
-        try:
-            barcodes = _pdf2image_barcode_scan(pdf_filepath)
         # Password protected files can't be checked
         # This is the exception raised for those
         except PDFPageCountError as e:
@@ -193,130 +235,133 @@ def scan_file_for_barcodes(
             logger.warning(
                 f"Exception during barcode scanning: {e}",
             )
-    else:
-        logger.warning(
-            f"Unsupported file format for barcode reader: {str(mime_type)}",
-        )
 
-    return DocumentBarcodeInfo(pdf_filepath, barcodes)
+    def get_separation_pages(self) -> Dict[int, bool]:
+        """
+        Search the parsed barcodes for separators and returns a dict of page
+        numbers, which separate the file into new files, together with the
+        information whether to keep the page.
+        """
+        # filter all barcodes for the separator string
+        # get the page numbers of the separating barcodes
+        separator_pages = {bc.page: False for bc in self.barcodes if bc.is_separator}
+        if not settings.CONSUMER_ENABLE_ASN_BARCODE:
+            return separator_pages
 
+        # add the page numbers of the ASN barcodes
+        # (except for first page, that might lead to infinite loops).
+        return {
+            **separator_pages,
+            **{bc.page: True for bc in self.barcodes if bc.is_asn and bc.page != 0},
+        }
 
-def get_separating_barcodes(barcodes: List[Barcode]) -> List[int]:
-    """
-    Search the parsed barcodes for separators
-    and returns a list of page numbers, which
-    separate the file into new files.
-    """
-    # filter all barcodes for the separator string
-    # get the page numbers of the separating barcodes
+    def separate_pages(self, pages_to_split_on: Dict[int, bool]) -> List[Path]:
+        """
+        Separate the provided pdf file on the pages_to_split_on.
+        The pages which are defined by the keys in page_numbers
+        will be removed if the corresponding value is false.
+        Returns a list of (temporary) filepaths to consume.
+        These will need to be deleted later.
+        """
 
-    return list({bc.page for bc in barcodes if bc.is_separator})
+        document_paths = []
+        fname = self.file.with_suffix("").name
+        with Pdf.open(self.pdf_file) as input_pdf:
+            # Start with an empty document
+            current_document: List[Page] = []
+            # A list of documents, ie a list of lists of pages
+            documents: List[List[Page]] = [current_document]
 
+            for idx, page in enumerate(input_pdf.pages):
+                # Keep building the new PDF as long as it is not a
+                # separator index
+                if idx not in pages_to_split_on:
+                    current_document.append(page)
+                    continue
 
-def get_asn_from_barcodes(barcodes: List[Barcode]) -> Optional[int]:
-    """
-    Search the parsed barcodes for any ASNs.
-    The first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
-    is considered the ASN to be used.
-    Returns the detected ASN (or None)
-    """
-    asn = None
+                # This is a split index
+                # Start a new destination page listing
+                logger.debug(f"Starting new document at idx {idx}")
+                current_document = []
+                documents.append(current_document)
+                keep_page = pages_to_split_on[idx]
+                if keep_page:
+                    # Keep the page
+                    # (new document is started by asn barcode)
+                    current_document.append(page)
 
-    # get the first barcode that starts with CONSUMER_ASN_BARCODE_PREFIX
-    asn_text = next(
-        (x.value for x in barcodes if x.is_asn),
-        None,
-    )
+            documents = [x for x in documents if len(x)]
 
-    if asn_text:
-        logger.debug(f"Found ASN Barcode: {asn_text}")
-        # remove the prefix and remove whitespace
-        asn_text = asn_text[len(settings.CONSUMER_ASN_BARCODE_PREFIX) :].strip()
+            logger.debug(f"Split into {len(documents)} new documents")
 
-        # now, try parsing the ASN number
-        try:
-            asn = int(asn_text)
-        except ValueError as e:
-            logger.warning(f"Failed to parse ASN number because: {e}")
+            # Write the new documents out
+            for doc_idx, document in enumerate(documents):
+                dst = Pdf.new()
+                dst.pages.extend(document)
 
-    return asn
+                output_filename = f"{fname}_document_{doc_idx}.pdf"
 
+                logger.debug(f"pdf no:{doc_idx} has {len(dst.pages)} pages")
+                savepath = Path(self.temp_dir.name) / output_filename
+                with open(savepath, "wb") as out:
+                    dst.save(out)
 
-def separate_pages(filepath: str, pages_to_split_on: List[int]) -> List[str]:
-    """
-    Separate the provided pdf file on the pages_to_split_on.
-    The pages which are defined by page_numbers will be removed.
-    Returns a list of (temporary) filepaths to consume.
-    These will need to be deleted later.
-    """
+                shutil.copystat(self.file, savepath)
 
-    document_paths = []
+                document_paths.append(savepath)
 
-    if not pages_to_split_on:
-        logger.warning("No pages to split on!")
-        return document_paths
+            return document_paths
 
-    os.makedirs(settings.SCRATCH_DIR, exist_ok=True)
-    tempdir = tempfile.mkdtemp(prefix="paperless-", dir=settings.SCRATCH_DIR)
-    fname = os.path.splitext(os.path.basename(filepath))[0]
-    pdf = Pdf.open(filepath)
+    def separate(
+        self,
+        source: DocumentSource,
+        override_name: Optional[str] = None,
+    ) -> bool:
+        """
+        Separates the document, based on barcodes and configuration, creating new
+        documents as required in the appropriate location.
 
-    # A list of documents, ie a list of lists of pages
-    documents: List[List[Page]] = []
-    # A single document, ie a list of pages
-    document: List[Page] = []
+        Returns True if a split happened, False otherwise
+        """
+        # Do nothing
+        if not self.supported_mime_type:
+            logger.warning(f"Unsupported file format for barcode reader: {self.mime}")
+            return False
 
-    for idx, page in enumerate(pdf.pages):
-        # Keep building the new PDF as long as it is not a
-        # separator index
-        if idx not in pages_to_split_on:
-            document.append(page)
-            # Make sure to append the very last document to the documents
-            if idx == (len(pdf.pages) - 1):
-                documents.append(document)
-                document = []
+        # Does nothing unless needed
+        self.convert_from_tiff_to_pdf()
+
+        # Actually read the codes, if any
+        self.detect()
+
+        separator_pages = self.get_separation_pages()
+
+        # Also do nothing
+        if not separator_pages:
+            logger.warning("No pages to split on!")
+            return False
+
+        # Create the split documents
+        doc_paths = self.separate_pages(separator_pages)
+
+        # Save the new documents to correct folder
+        if source != DocumentSource.ConsumeFolder:
+            # The given file is somewhere in SCRATCH_DIR,
+            # and new documents must be moved to the CONSUMPTION_DIR
+            # for the consumer to notice them
+            save_to_dir = settings.CONSUMPTION_DIR
         else:
-            # This is a split index, save the current PDF pages, and restart
-            # a new destination page listing
-            logger.debug(f"Starting new document at idx {idx}")
-            documents.append(document)
-            document = []
+            # The given file is somewhere in CONSUMPTION_DIR,
+            # and may be some levels down for recursive tagging
+            # so use the file's parent to preserve any metadata
+            save_to_dir = self.file.parent
 
-    documents = [x for x in documents if len(x)]
-
-    logger.debug(f"Split into {len(documents)} new documents")
-
-    # Write the new documents out
-    for doc_idx, document in enumerate(documents):
-        dst = Pdf.new()
-        dst.pages.extend(document)
-
-        output_filename = f"{fname}_document_{doc_idx}.pdf"
-
-        logger.debug(f"pdf no:{doc_idx} has {len(dst.pages)} pages")
-        savepath = os.path.join(tempdir, output_filename)
-        with open(savepath, "wb") as out:
-            dst.save(out)
-        document_paths.append(savepath)
-
-    return document_paths
-
-
-def save_to_dir(
-    filepath: str,
-    newname: str = None,
-    target_dir: str = settings.CONSUMPTION_DIR,
-):
-    """
-    Copies filepath to target_dir.
-    Optionally rename the file.
-    """
-    if os.path.isfile(filepath) and os.path.isdir(target_dir):
-        dst = shutil.copy(filepath, target_dir)
-        logging.debug(f"saved {str(filepath)} to {str(dst)}")
-        if newname:
-            dst_new = os.path.join(target_dir, newname)
-            logger.debug(f"moving {str(dst)} to {str(dst_new)}")
-            os.rename(dst, dst_new)
-    else:
-        logger.warning(f"{str(filepath)} or {str(target_dir)} don't exist.")
+        for idx, document_path in enumerate(doc_paths):
+            if override_name is not None:
+                newname = f"{idx}_{override_name}"
+                dest = save_to_dir / newname
+            else:
+                dest = save_to_dir
+            logger.info(f"Saving {document_path} to {dest}")
+            shutil.copy2(document_path, dest)
+        return True

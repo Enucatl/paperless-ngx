@@ -5,6 +5,8 @@ import { EditDialogComponent } from 'src/app/components/common/edit-dialog/edit-
 import { DEFAULT_MATCHING_ALGORITHM } from 'src/app/data/matching-model'
 import { PaperlessCorrespondent } from 'src/app/data/paperless-correspondent'
 import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
+import { UserService } from 'src/app/services/rest/user.service'
+import { SettingsService } from 'src/app/services/settings.service'
 
 @Component({
   selector: 'app-correspondent-edit-dialog',
@@ -12,8 +14,13 @@ import { CorrespondentService } from 'src/app/services/rest/correspondent.servic
   styleUrls: ['./correspondent-edit-dialog.component.scss'],
 })
 export class CorrespondentEditDialogComponent extends EditDialogComponent<PaperlessCorrespondent> {
-  constructor(service: CorrespondentService, activeModal: NgbActiveModal) {
-    super(service, activeModal)
+  constructor(
+    service: CorrespondentService,
+    activeModal: NgbActiveModal,
+    userService: UserService,
+    settingsService: SettingsService
+  ) {
+    super(service, activeModal, userService, settingsService)
   }
 
   getCreateTitle() {
@@ -30,6 +37,7 @@ export class CorrespondentEditDialogComponent extends EditDialogComponent<Paperl
       matching_algorithm: new FormControl(DEFAULT_MATCHING_ALGORITHM),
       match: new FormControl(''),
       is_insensitive: new FormControl(true),
+      permissions_form: new FormControl(null),
     })
   }
 }

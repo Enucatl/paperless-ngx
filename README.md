@@ -1,7 +1,7 @@
 [![ci](https://github.com/paperless-ngx/paperless-ngx/workflows/ci/badge.svg)](https://github.com/paperless-ngx/paperless-ngx/actions)
 [![Crowdin](https://badges.crowdin.net/paperless-ngx/localized.svg)](https://crowdin.com/project/paperless-ngx)
 [![Documentation Status](https://img.shields.io/github/deployments/paperless-ngx/paperless-ngx/github-pages?label=docs)](https://docs.paperless-ngx.com)
-[![Coverage Status](https://coveralls.io/repos/github/paperless-ngx/paperless-ngx/badge.svg?branch=master)](https://coveralls.io/github/paperless-ngx/paperless-ngx?branch=master)
+[![codecov](https://codecov.io/gh/paperless-ngx/paperless-ngx/branch/main/graph/badge.svg?token=VK6OUPJ3TY)](https://codecov.io/gh/paperless-ngx/paperless-ngx)
 [![Chat on Matrix](https://matrix.to/img/matrix-badge.svg)](https://matrix.to/#/%23paperlessngx%3Amatrix.org)
 [![demo](https://cronitor.io/badges/ve7ItY/production/W5E_B9jkelG9ZbDiNHUPQEVH3MY.svg)](https://demo.paperless-ngx.com)
 
@@ -101,13 +101,9 @@ For bugs please [open an issue](https://github.com/paperless-ngx/paperless-ngx/i
 
 # Affiliated Projects
 
-Paperless has been around a while now, and people are starting to build stuff on top of it. If you're one of those people, we can add your project to this list:
-
-- [Paperless App](https://github.com/bauerj/paperless_app): An Android/iOS app for Paperless-ngx. Also works with the original Paperless and Paperless-ng.
-- [Paperless Share](https://github.com/qcasey/paperless_share). Share any files from your Android application with paperless. Very simple, but works with all of the mobile scanning apps out there that allow you to share scanned documents.
-- [Scan to Paperless](https://github.com/sbrunner/scan-to-paperless): Scan and prepare (crop, deskew, OCR, ...) your documents for Paperless.
-- [Paperless Mobile](https://github.com/astubenbord/paperless-mobile): A modern, feature rich mobile application for Paperless.
+Please see [the wiki](https://github.com/paperless-ngx/paperless-ngx/wiki/Affiliated-Projects) for a user-maintained list of affiliated projects and software that is compatible with Paperless-ngx.
 
 # Important Note
 
-Document scanners are typically used to scan sensitive documents. Things like your social insurance number, tax records, invoices, etc. Everything is stored in the clear without encryption. This means that Paperless should never be run on an untrusted host. Instead, I recommend that if you do want to use it, run it locally on a server in your own home.
+> Document scanners are typically used to scan sensitive documents like your social insurance number, tax records, invoices, etc. **Paperless-ngx should never be run on an untrusted host** because information is stored in clear text without encryption. No guarantees are made regarding security (but we do try!) and you use the app at your own risk.
+> **The safest way to run Paperless-ngx is on a local server in your own home with backups in place**.

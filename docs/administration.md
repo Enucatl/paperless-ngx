@@ -98,7 +98,7 @@ the background.
     won't automatically update to newer versions. In order to enable
     updates as described above, either get the new `docker-compose.yml`
     file from
-    [here](https://github.com/paperless-ngx/paperless-ngx/tree/master/docker/compose)
+    [here](https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose)
     or edit the `docker-compose.yml` file, find the line that says
 
     ```
@@ -148,6 +148,13 @@ following:
     $ pip install -r requirements.txt
     ```
 
+    !!! note
+
+        At times, some dependencies will be removed from requirements.txt.
+        Comparing the versions and removing no longer needed dependencies
+        will keep your system or virtual environment clean and prevent
+        possible conflicts.
+
 3.  Migrate the database.
 
     ```shell-session
@@ -159,6 +166,16 @@ following:
 
     This might not actually do anything. Not every new paperless version
     comes with new database migrations.
+
+### Database Upgrades
+
+In general, paperless does not require a specific version of PostgreSQL or MariaDB and it is
+safe to update them to newer versions. However, you should always take a backup and follow
+the instructions from your database's documentation for how to upgrade between major versions.
+
+For PostgreSQL, refer to [Upgrading a PostgreSQL Cluster](https://www.postgresql.org/docs/current/upgrading.html).
+
+For MariaDB, refer to [Upgrading MariaDB](https://mariadb.com/kb/en/upgrading/)
 
 ## Downgrading Paperless {#downgrade-paperless}
 
@@ -296,7 +313,7 @@ will be placed in individual json files, instead of a single JSON file. The main
 manifest.json will still contain application wide information (e.g. tags, correspondent,
 documenttype, etc)
 
-If `-z` or `--zip` is provided, the export will be a zipfile
+If `-z` or `--zip` is provided, the export will be a zip file
 in the target directory, named according to the current date.
 
 !!! warning
@@ -475,12 +492,13 @@ mail_fetcher
 The command takes no arguments and processes all your mail accounts and
 rules.
 
-!!! note
+!!! tip
 
-    As of October 2022 Microsoft no longer supports IMAP authentication
-    for Exchange servers, thus Exchange is no longer supported until a
-    solution is implemented in the Python IMAP library used by Paperless.
-    See [learn.microsoft.com](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online)
+    To use OAuth access tokens for mail fetching,
+    select the box to indicate the password is actually
+    a token when creating or editing a mail account. The
+    details for creating a token depend on your email
+    provider.
 
 ### Creating archived documents {#archiver}
 

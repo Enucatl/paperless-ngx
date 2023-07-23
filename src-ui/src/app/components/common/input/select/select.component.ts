@@ -26,8 +26,43 @@ export class SelectComponent extends AbstractInputComponent<number> {
     this.addItemRef = this.addItem.bind(this)
   }
 
+  _items: any[]
+
   @Input()
-  items: any[]
+  set items(items) {
+    this._items = items
+    if (items && this.value) this.checkForPrivateItems(this.value)
+  }
+
+  writeValue(newValue: any): void {
+    if (newValue && this._items) {
+      this.checkForPrivateItems(newValue)
+      this.items = [...this._items] // we need to explicitly re-set items
+    }
+    super.writeValue(newValue)
+  }
+
+  checkForPrivateItems(value: any) {
+    if (Array.isArray(value)) {
+      if (value.length > 0) value.forEach((id) => this.checkForPrivateItem(id))
+    } else {
+      this.checkForPrivateItem(value)
+    }
+  }
+
+  checkForPrivateItem(id) {
+    if (this._items.find((i) => i.id === id) === undefined) {
+      this._items.push({
+        id: id,
+        name: $localize`Private`,
+        private: true,
+      })
+    }
+  }
+
+  get items(): any[] {
+    return this._items
+  }
 
   @Input()
   textColor: any
@@ -44,8 +79,20 @@ export class SelectComponent extends AbstractInputComponent<number> {
   @Input()
   placeholder: string
 
+  @Input()
+  multiple: boolean = false
+
+  @Input()
+  bindLabel: string = 'name'
+
+  @Input()
+  showFilter: boolean = false
+
   @Output()
   createNew = new EventEmitter<string>()
+
+  @Output()
+  filterDocuments = new EventEmitter<any[]>()
 
   public addItemRef: (name) => void
 
@@ -53,6 +100,10 @@ export class SelectComponent extends AbstractInputComponent<number> {
 
   get allowCreateNew(): boolean {
     return this.createNew.observers.length > 0
+  }
+
+  get isPrivate(): boolean {
+    return this.items?.find((i) => i.id === this.value)?.private
   }
 
   getSuggestions() {
@@ -88,5 +139,13 @@ export class SelectComponent extends AbstractInputComponent<number> {
     setTimeout(() => {
       this.clearLastSearchTerm()
     }, 3000)
+  }
+
+  onFilterDocuments() {
+    this.filterDocuments.emit([this.items.find((i) => i.id === this.value)])
+  }
+
+  get filterButtonTitle() {
+    return $localize`Filter documents with this ${this.title}`
   }
 }

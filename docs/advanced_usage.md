@@ -9,7 +9,7 @@ Paperless will compare the matching algorithms defined by every tag,
 correspondent, document type, and storage path in your database to see
 if they apply to the text in a document. In other words, if you define a
 tag called `Home Utility` that had a `match` property of `bc hydro` and
-a `matching_algorithm` of `literal`, Paperless will automatically tag
+a `matching_algorithm` of `Exact`, Paperless will automatically tag
 your newly-consumed document with your `Home Utility` tag so long as the
 text `bc hydro` appears in the body of the document somewhere.
 
@@ -25,12 +25,13 @@ documents.
 
 The following algorithms are available:
 
+- **None:** No matching will be performed.
 - **Any:** Looks for any occurrence of any word provided in match in
   the PDF. If you define the match as `Bank1 Bank2`, it will match
   documents containing either of these terms.
 - **All:** Requires that every word provided appears in the PDF,
   albeit not in the order provided.
-- **Literal:** Matches only if the match appears exactly as provided
+- **Exact:** Matches only if the match appears exactly as provided
   (i.e. preserve ordering) in the PDF.
 - **Regular expression:** Parses the match as a regular expression and
   tries to find a match within the document.
@@ -308,6 +309,8 @@ Paperless provides the following placeholders within filenames:
 - `{added_month_name_short}`: Month added abbreviated name, as per
   locale
 - `{added_day}`: Day added only (number 01-31).
+- `{owner_username}`: Username of document owner, if any, or "none"
+- `{original_name}`: Document original filename, minus the extension, if any, or "none"
 
 Paperless will try to conserve the information from your database as
 much as possible. However, some characters that you can use in document
@@ -368,7 +371,7 @@ value.
 One of the best things in Paperless is that you can not only access the
 documents via the web interface, but also via the file system.
 
-When as single storage layout is not sufficient for your use case,
+When a single storage layout is not sufficient for your use case,
 storage paths come to the rescue. Storage paths allow you to configure
 more precisely where each document is stored in the file system.
 
@@ -400,7 +403,7 @@ structure as in the previous example above.
      Statement January.pdf
      Statement February.pdf
 
- Insurances/                           # Insurances
+Insurances/                             # Insurances
    Healthcare 123/
      2022-01-01 Statement January.pdf
      2022-02-02 Letter.pdf
@@ -413,13 +416,6 @@ structure as in the previous example above.
 
     Defining a storage path is optional. If no storage path is defined for a
     document, the global `PAPERLESS_FILENAME_FORMAT` is applied.
-
-!!! warning
-
-    If you adjust the format of an existing storage path, old documents
-    don't get relocated automatically. You need to run the
-    [document renamer](/administration#renamer) to
-    adjust their paths.
 
 ## Celery Monitoring {#celery-monitoring}
 
@@ -492,7 +488,7 @@ database to be case sensitive. This would prevent a user from creating a
 tag `Name` and `NAME` as they are considered the same.
 
 Per Django documentation, to enable this requires manual intervention.
-To enable case sensetive tables, you can execute the following command
+To enable case sensitive tables, you can execute the following command
 against each table:
 
 `ALTER TABLE <table_name> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;`
@@ -501,3 +497,49 @@ You can also set the default for new tables (this does NOT affect
 existing tables) with:
 
 `ALTER DATABASE <db_name> CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;`
+
+!!! warning
+
+    Using mariadb version 10.4+ is recommended. Using the `utf8mb3` character set on
+    an older system may fix issues that can arise while setting up Paperless-ngx but
+    `utf8mb3` can cause issues with consumption (where `utf8mb4` does not).
+
+## Barcodes {#barcodes}
+
+Paperless is able to utilize barcodes for automatically preforming some tasks.
+
+At this time, the library utilized for detection of barcodes supports the following types:
+
+- AN-13/UPC-A
+- UPC-E
+- EAN-8
+- Code 128
+- Code 93
+- Code 39
+- Codabar
+- Interleaved 2 of 5
+- QR Code
+- SQ Code
+
+You may check for updates on the [zbar library homepage](https://github.com/mchehab/zbar).
+For usage in Paperless, the type of barcode does not matter, only the contents of it.
+
+For how to enable barcode usage, see [the configuration](/configuration#barcodes).
+The two settings may be enabled independently, but do have interactions as explained
+below.
+
+### Document Splitting
+
+When enabled, Paperless will look for a barcode with the configured value and create a new document
+starting from the next page. The page with the barcode on it will _not_ be retained. It
+is expected to be a page existing only for triggering the split.
+
+### Archive Serial Number Assignment
+
+When enabled, the value of the barcode (as an integer) will be used to set the document's
+archive serial number, allowing quick reference back to the original, paper document.
+
+If document splitting via barcode is also enabled, documents will be split when an ASN
+barcode is located. However, differing from the splitting, the page with the
+barcode _will_ be retained. This allows application of a barcode to any page, including
+one which holds data to keep in the document.

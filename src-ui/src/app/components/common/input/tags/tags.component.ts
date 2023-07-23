@@ -1,9 +1,17 @@
-import { Component, forwardRef, Input, OnInit } from '@angular/core'
+import {
+  Component,
+  EventEmitter,
+  forwardRef,
+  Input,
+  OnInit,
+  Output,
+} from '@angular/core'
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { PaperlessTag } from 'src/app/data/paperless-tag'
 import { TagEditDialogComponent } from '../../edit-dialog/tag-edit-dialog/tag-edit-dialog.component'
 import { TagService } from 'src/app/services/rest/tag.service'
+import { EditDialogMode } from '../../edit-dialog/edit-dialog.component'
 
 @Component({
   providers: [
@@ -57,6 +65,12 @@ export class TagsComponent implements OnInit, ControlValueAccessor {
   @Input()
   allowCreate: boolean = true
 
+  @Input()
+  showFilter: boolean = false
+
+  @Output()
+  filterDocuments = new EventEmitter<PaperlessTag[]>()
+
   value: number[]
 
   tags: PaperlessTag[]
@@ -65,7 +79,7 @@ export class TagsComponent implements OnInit, ControlValueAccessor {
 
   private _lastSearchTerm: string
 
-  getTag(id) {
+  getTag(id: number) {
     if (this.tags) {
       return this.tags.find((tag) => tag.id == id)
     } else {
@@ -73,7 +87,12 @@ export class TagsComponent implements OnInit, ControlValueAccessor {
     }
   }
 
-  removeTag(id) {
+  removeTag(event: PointerEvent, id: number) {
+    if (this.disabled) return
+
+    // prevent opening dropdown
+    event.stopImmediatePropagation()
+
     let index = this.value.indexOf(id)
     if (index > -1) {
       let oldValue = this.value
@@ -87,7 +106,7 @@ export class TagsComponent implements OnInit, ControlValueAccessor {
     var modal = this.modalService.open(TagEditDialogComponent, {
       backdrop: 'static',
     })
-    modal.componentInstance.dialogMode = 'create'
+    modal.componentInstance.dialogMode = EditDialogMode.CREATE
     if (name) modal.componentInstance.object = { name: name }
     else if (this._lastSearchTerm)
       modal.componentInstance.object = { name: this._lastSearchTerm }
@@ -127,5 +146,17 @@ export class TagsComponent implements OnInit, ControlValueAccessor {
     setTimeout(() => {
       this.clearLastSearchTerm()
     }, 3000)
+  }
+
+  get hasPrivate(): boolean {
+    return this.value.some(
+      (t) => this.tags?.find((t2) => t2.id === t) === undefined
+    )
+  }
+
+  onFilterDocuments() {
+    this.filterDocuments.emit(
+      this.tags.filter((t) => this.value.includes(t.id))
+    )
   }
 }

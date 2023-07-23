@@ -14,6 +14,7 @@ import magic
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -30,9 +31,9 @@ from .models import DocumentType
 from .models import FileInfo
 from .models import Tag
 from .parsers import DocumentParser
+from .parsers import ParseError
 from .parsers import get_parser_class_for_mime_type
 from .parsers import parse_date
-from .parsers import ParseError
 from .signals import document_consumption_finished
 from .signals import document_consumption_started
 
@@ -59,7 +60,6 @@ MESSAGE_FINISHED = "finished"
 
 
 class Consumer(LoggingMixin):
-
     logging_name = "paperless.consumer"
 
     def _send_progress(
@@ -69,7 +69,7 @@ class Consumer(LoggingMixin):
         status,
         message=None,
         document_id=None,
-    ):
+    ):  # pragma: no cover
         payload = {
             "filename": os.path.basename(self.filename) if self.filename else None,
             "task_id": self.task_id,
@@ -92,7 +92,7 @@ class Consumer(LoggingMixin):
         exception: Optional[Exception] = None,
     ):
         self._send_progress(100, 100, "FAILED", message)
-        self.log("error", log_message or message, exc_info=exc_info)
+        self.log.error(log_message or message, exc_info=exc_info)
         raise ConsumerError(f"{self.filename}: {log_message or message}") from exception
 
     def __init__(self):
@@ -106,6 +106,7 @@ class Consumer(LoggingMixin):
         self.override_document_type_id = None
         self.override_asn = None
         self.task_id = None
+        self.owner_id = None
 
         self.channel_layer = get_channel_layer()
 
@@ -146,11 +147,16 @@ class Consumer(LoggingMixin):
             return
         # Validate the range is above zero and less than uint32_t max
         # otherwise, Whoosh can't handle it in the index
-        if self.override_asn < 0 or self.override_asn > 0xFF_FF_FF_FF:
+        if (
+            self.override_asn < Document.ARCHIVE_SERIAL_NUMBER_MIN
+            or self.override_asn > Document.ARCHIVE_SERIAL_NUMBER_MAX
+        ):
             self._fail(
                 MESSAGE_ASN_RANGE,
                 f"Not consuming {self.filename}: "
-                f"Given ASN {self.override_asn} is out of range [0, 4,294,967,295]",
+                f"Given ASN {self.override_asn} is out of range "
+                f"[{Document.ARCHIVE_SERIAL_NUMBER_MIN:,}, "
+                f"{Document.ARCHIVE_SERIAL_NUMBER_MAX:,}]",
             )
         if Document.objects.filter(archive_serial_number=self.override_asn).exists():
             self._fail(
@@ -169,7 +175,7 @@ class Consumer(LoggingMixin):
                 f"{settings.PRE_CONSUME_SCRIPT} does not exist.",
             )
 
-        self.log("info", f"Executing pre-consume script {settings.PRE_CONSUME_SCRIPT}")
+        self.log.info(f"Executing pre-consume script {settings.PRE_CONSUME_SCRIPT}")
 
         working_file_path = str(self.path)
         original_file_path = str(self.original_path)
@@ -212,8 +218,7 @@ class Consumer(LoggingMixin):
                 f"{settings.POST_CONSUME_SCRIPT} does not exist.",
             )
 
-        self.log(
-            "info",
+        self.log.info(
             f"Executing post-consume script {settings.POST_CONSUME_SCRIPT}",
         )
 
@@ -277,7 +282,7 @@ class Consumer(LoggingMixin):
 
     def try_consume_file(
         self,
-        path,
+        path: Path,
         override_filename=None,
         override_title=None,
         override_correspondent_id=None,
@@ -286,6 +291,7 @@ class Consumer(LoggingMixin):
         task_id=None,
         override_created=None,
         override_asn=None,
+        override_owner_id=None,
     ) -> Document:
         """
         Return the document object if it was successfully created.
@@ -300,13 +306,9 @@ class Consumer(LoggingMixin):
         self.task_id = task_id or str(uuid.uuid4())
         self.override_created = override_created
         self.override_asn = override_asn
+        self.override_owner_id = override_owner_id
 
         self._send_progress(0, 100, "STARTING", MESSAGE_NEW_FILE)
-
-        # this is for grouping logging entries for this particular file
-        # together.
-
-        self.renew_logging_group()
 
         # Make sure that preconditions for consuming the file are met.
 
@@ -315,7 +317,7 @@ class Consumer(LoggingMixin):
         self.pre_check_duplicate()
         self.pre_check_asn_value()
 
-        self.log("info", f"Consuming {self.filename}")
+        self.log.info(f"Consuming {self.filename}")
 
         # For the actual work, copy the file into a tempdir
         self.original_path = self.path
@@ -324,19 +326,20 @@ class Consumer(LoggingMixin):
             dir=settings.SCRATCH_DIR,
         )
         self.path = Path(tempdir.name) / Path(self.filename)
-        shutil.copy(self.original_path, self.path)
+        shutil.copy2(self.original_path, self.path)
 
         # Determine the parser class.
 
         mime_type = magic.from_file(self.path, mime=True)
 
-        self.log("debug", f"Detected mime type: {mime_type}")
+        self.log.debug(f"Detected mime type: {mime_type}")
 
         # Based on the mime type, get the parser for that type
         parser_class: Optional[Type[DocumentParser]] = get_parser_class_for_mime_type(
             mime_type,
         )
         if not parser_class:
+            tempdir.cleanup()
             self._fail(MESSAGE_UNSUPPORTED_TYPE, f"Unsupported mime type {mime_type}")
 
         # Notify all listeners that we're going to do some work.
@@ -349,7 +352,7 @@ class Consumer(LoggingMixin):
 
         self.run_pre_consume_script()
 
-        def progress_callback(current_progress, max_progress):
+        def progress_callback(current_progress, max_progress):  # pragma: no cover
             # recalculate progress to be within 20 and 80
             p = int((current_progress / max_progress) * 50 + 20)
             self._send_progress(p, 100, "WORKING")
@@ -361,7 +364,7 @@ class Consumer(LoggingMixin):
             progress_callback,
         )
 
-        self.log("debug", f"Parser: {type(document_parser).__name__}")
+        self.log.debug(f"Parser: {type(document_parser).__name__}")
 
         # However, this already created working directories which we have to
         # clean up.
@@ -375,10 +378,10 @@ class Consumer(LoggingMixin):
 
         try:
             self._send_progress(20, 100, "WORKING", MESSAGE_PARSING_DOCUMENT)
-            self.log("debug", f"Parsing {self.filename}...")
+            self.log.debug(f"Parsing {self.filename}...")
             document_parser.parse(self.path, mime_type, self.filename)
 
-            self.log("debug", f"Generating thumbnail for {self.filename}...")
+            self.log.debug(f"Generating thumbnail for {self.filename}...")
             self._send_progress(70, 100, "WORKING", MESSAGE_GENERATING_THUMBNAIL)
             thumbnail = document_parser.get_thumbnail(
                 self.path,
@@ -395,6 +398,7 @@ class Consumer(LoggingMixin):
 
         except ParseError as e:
             document_parser.cleanup()
+            tempdir.cleanup()
             self._fail(
                 str(e),
                 f"Error while consuming document {self.filename}: {e}",
@@ -415,7 +419,6 @@ class Consumer(LoggingMixin):
         # in the system. This will be a transaction and reasonably fast.
         try:
             with transaction.atomic():
-
                 # store the document.
                 document = self._store(text=text, date=date, mime_type=mime_type)
 
@@ -466,7 +469,7 @@ class Consumer(LoggingMixin):
                 document.save()
 
                 # Delete the file only if it was successfully consumed
-                self.log("debug", f"Deleting file {self.path}")
+                self.log.debug(f"Deleting file {self.path}")
                 os.unlink(self.path)
                 self.original_path.unlink()
 
@@ -477,7 +480,7 @@ class Consumer(LoggingMixin):
                 )
 
                 if os.path.isfile(shadow_file):
-                    self.log("debug", f"Deleting file {shadow_file}")
+                    self.log.debug(f"Deleting file {shadow_file}")
                     os.unlink(shadow_file)
 
         except Exception as e:
@@ -494,7 +497,7 @@ class Consumer(LoggingMixin):
 
         self.run_post_consume_script(document)
 
-        self.log("info", f"Document {document} consumption finished")
+        self.log.info(f"Document {document} consumption finished")
 
         self._send_progress(100, 100, "SUCCESS", MESSAGE_FINISHED, document.id)
 
@@ -509,31 +512,29 @@ class Consumer(LoggingMixin):
         date: Optional[datetime.datetime],
         mime_type: str,
     ) -> Document:
-
         # If someone gave us the original filename, use it instead of doc.
 
         file_info = FileInfo.from_filename(self.filename)
 
-        self.log("debug", "Saving record to database")
+        self.log.debug("Saving record to database")
 
         if self.override_created is not None:
             create_date = self.override_created
-            self.log(
-                "debug",
+            self.log.debug(
                 f"Creation date from post_documents parameter: {create_date}",
             )
         elif file_info.created is not None:
             create_date = file_info.created
-            self.log("debug", f"Creation date from FileInfo: {create_date}")
+            self.log.debug(f"Creation date from FileInfo: {create_date}")
         elif date is not None:
             create_date = date
-            self.log("debug", f"Creation date from parse_date: {create_date}")
+            self.log.debug(f"Creation date from parse_date: {create_date}")
         else:
-            stats = os.stat(self.path)
+            stats = os.stat(self.original_path)
             create_date = timezone.make_aware(
                 datetime.datetime.fromtimestamp(stats.st_mtime),
             )
-            self.log("debug", f"Creation date from st_mtime: {create_date}")
+            self.log.debug(f"Creation date from st_mtime: {create_date}")
 
         storage_type = Document.STORAGE_TYPE_UNENCRYPTED
 
@@ -573,18 +574,27 @@ class Consumer(LoggingMixin):
         if self.override_asn:
             document.archive_serial_number = self.override_asn
 
+        if self.override_owner_id:
+            document.owner = User.objects.get(
+                pk=self.override_owner_id,
+            )
+
     def _write(self, storage_type, source, target):
-        with open(source, "rb") as read_file:
-            with open(target, "wb") as write_file:
-                write_file.write(read_file.read())
+        with open(source, "rb") as read_file, open(target, "wb") as write_file:
+            write_file.write(read_file.read())
+
+        # Attempt to copy file's original stats, but it's ok if we can't
+        try:
+            shutil.copystat(source, target)
+        except Exception:  # pragma: no cover
+            pass
 
     def _log_script_outputs(self, completed_process: CompletedProcess):
         """
         Decodes a process stdout and stderr streams and logs them to the main log
         """
         # Log what the script exited as
-        self.log(
-            "info",
+        self.log.info(
             f"{completed_process.args[0]} exited {completed_process.returncode}",
         )
 
@@ -597,9 +607,9 @@ class Consumer(LoggingMixin):
                     "\n",
                 )
             )
-            self.log("info", "Script stdout:")
+            self.log.info("Script stdout:")
             for line in stdout_str:
-                self.log("info", line)
+                self.log.info(line)
 
         if len(completed_process.stderr):
             stderr_str = (
@@ -610,6 +620,6 @@ class Consumer(LoggingMixin):
                 )
             )
 
-            self.log("warning", "Script stderr:")
+            self.log.warning("Script stderr:")
             for line in stderr_str:
-                self.log("warning", line)
+                self.log.warning(line)
