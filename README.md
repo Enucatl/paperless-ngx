@@ -14,6 +14,9 @@
 
 # Paperless-ngx
 
+## What is this fork about?
+It contains my edits to [docker/compose/docker-compose.postgres-tika.yml](https://github.com/Enucatl/paperless-ngx/blob/main/docker/compose/docker-compose.postgres-tika.yml).
+
 Paperless-ngx is a document management system that transforms your physical documents into a searchable online archive so you can keep, well, _less paper_.
 
 Paperless-ngx forked from [paperless-ng](https://github.com/jonaswinkler/paperless-ng) to continue the great work and distribute responsibility of supporting and advancing the project among a team of people. [Consider joining us!](#community-support) Discussion of this transition can be found in issues
@@ -61,7 +64,7 @@ A demo is available at [demo.paperless-ngx.com](https://demo.paperless-ngx.com) 
 
 # Getting started
 
-The easiest way to deploy paperless is docker-compose. The files in the [`/docker/compose` directory](https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose) are configured to pull the image from Github Packages.
+The easiest way to deploy paperless is d30socker-compose. The files in the [`/docker/compose` directory](https://github.com/paperless-ngx/paperless-ngx/tree/main/docker/compose) are configured to pull the image from Github Packages.
 
 If you'd like to jump right in, you can configure a docker-compose environment with our install script:
 
