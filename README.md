@@ -12,10 +12,11 @@
 
 <!-- omit in toc -->
 
-# Paperless-ngx
-
 ## What is this fork about?
+
 It contains my edits to [docker/compose/docker-compose.postgres-tika.yml](https://github.com/Enucatl/paperless-ngx/blob/main/docker/compose/docker-compose.postgres-tika.yml).
+
+# Paperless-ngx
 
 Paperless-ngx is a document management system that transforms your physical documents into a searchable online archive so you can keep, well, _less paper_.
 
