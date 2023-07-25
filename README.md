@@ -15,6 +15,7 @@
 ## What is this fork about?
 
 It contains my edits to [docker/compose/docker-compose.postgres-tika.yml](https://github.com/Enucatl/paperless-ngx/blob/main/docker/compose/docker-compose.postgres-tika.yml).
+I use this to run my own paperless-ngx instance.
 
 # Paperless-ngx
 
