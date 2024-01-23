@@ -7,11 +7,11 @@ import {
   NgbNav,
   NgbNavChangeEvent,
 } from '@ng-bootstrap/ng-bootstrap'
-import { PaperlessCorrespondent } from 'src/app/data/paperless-correspondent'
-import { PaperlessDocument } from 'src/app/data/paperless-document'
-import { PaperlessDocumentMetadata } from 'src/app/data/paperless-document-metadata'
-import { PaperlessDocumentType } from 'src/app/data/paperless-document-type'
-import { PaperlessTag } from 'src/app/data/paperless-tag'
+import { Correspondent } from 'src/app/data/correspondent'
+import { Document } from 'src/app/data/document'
+import { DocumentMetadata } from 'src/app/data/document-metadata'
+import { DocumentType } from 'src/app/data/document-type'
+import { Tag } from 'src/app/data/tag'
 import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
 import { DocumentListViewService } from 'src/app/services/document-list-view.service'
 import { OpenDocumentsService } from 'src/app/services/open-documents.service'
@@ -21,7 +21,6 @@ import { DocumentService } from 'src/app/services/rest/document.service'
 import { ConfirmDialogComponent } from '../common/confirm-dialog/confirm-dialog.component'
 import { CorrespondentEditDialogComponent } from '../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
 import { DocumentTypeEditDialogComponent } from '../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
-import { PDFDocumentProxy } from 'ng2-pdf-viewer'
 import { ToastService } from 'src/app/services/toast.service'
 import { TextComponent } from '../common/input/text/text.component'
 import { SettingsService } from 'src/app/services/settings.service'
@@ -34,8 +33,9 @@ import {
   map,
   debounceTime,
   distinctUntilChanged,
+  filter,
 } from 'rxjs/operators'
-import { PaperlessDocumentSuggestions } from 'src/app/data/paperless-document-suggestions'
+import { DocumentSuggestions } from 'src/app/data/document-suggestions'
 import {
   FILTER_CORRESPONDENT,
   FILTER_CREATED_AFTER,
@@ -46,29 +46,27 @@ import {
   FILTER_STORAGE_PATH,
 } from 'src/app/data/filter-rule-type'
 import { StoragePathService } from 'src/app/services/rest/storage-path.service'
-import { PaperlessStoragePath } from 'src/app/data/paperless-storage-path'
+import { StoragePath } from 'src/app/data/storage-path'
 import { StoragePathEditDialogComponent } from '../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
-import { SETTINGS_KEYS } from 'src/app/data/paperless-uisettings'
+import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import {
   PermissionAction,
   PermissionsService,
   PermissionType,
 } from 'src/app/services/permissions.service'
-import { PaperlessUser } from 'src/app/data/paperless-user'
+import { User } from 'src/app/data/user'
 import { UserService } from 'src/app/services/rest/user.service'
-import { PaperlessDocumentNote } from 'src/app/data/paperless-document-note'
+import { DocumentNote } from 'src/app/data/document-note'
 import { HttpClient } from '@angular/common/http'
 import { ComponentWithPermissions } from '../with-permissions/with-permissions.component'
 import { EditDialogMode } from '../common/edit-dialog/edit-dialog.component'
 import { ObjectWithId } from 'src/app/data/object-with-id'
 import { FilterRule } from 'src/app/data/filter-rule'
 import { ISODateAdapter } from 'src/app/utils/ngb-iso-date-adapter'
-import {
-  PaperlessCustomField,
-  PaperlessCustomFieldDataType,
-} from 'src/app/data/paperless-custom-field'
-import { PaperlessCustomFieldInstance } from 'src/app/data/paperless-custom-field-instance'
+import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
+import { CustomFieldInstance } from 'src/app/data/custom-field-instance'
 import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
+import { PDFDocumentProxy } from '../common/pdf-viewer/typings'
 
 enum DocumentDetailNavIDs {
   Details = 1,
@@ -77,6 +75,18 @@ enum DocumentDetailNavIDs {
   Preview = 4,
   Notes = 5,
   Permissions = 6,
+}
+
+enum ZoomSetting {
+  PageFit = 'page-fit',
+  PageWidth = 'page-width',
+  Quarter = '.25',
+  Half = '.5',
+  ThreeQuarters = '.75',
+  One = '1',
+  OneAndHalf = '1.5',
+  Two = '2',
+  Three = '3',
 }
 
 @Component({
@@ -99,10 +109,10 @@ export class DocumentDetailComponent
   networkActive = false
 
   documentId: number
-  document: PaperlessDocument
-  metadata: PaperlessDocumentMetadata
-  suggestions: PaperlessDocumentSuggestions
-  users: PaperlessUser[]
+  document: Document
+  metadata: DocumentMetadata
+  suggestions: DocumentSuggestions
+  users: User[]
 
   title: string
   titleSubject: Subject<string> = new Subject()
@@ -111,9 +121,9 @@ export class DocumentDetailComponent
   downloadUrl: string
   downloadOriginalUrl: string
 
-  correspondents: PaperlessCorrespondent[]
-  documentTypes: PaperlessDocumentType[]
-  storagePaths: PaperlessStoragePath[]
+  correspondents: Correspondent[]
+  documentTypes: DocumentType[]
+  storagePaths: StoragePath[]
 
   documentForm: FormGroup = new FormGroup({
     title: new FormControl(''),
@@ -130,6 +140,8 @@ export class DocumentDetailComponent
 
   previewCurrentPage: number = 1
   previewNumPages: number = 1
+  previewZoomSetting: ZoomSetting = ZoomSetting.One
+  previewZoomScale: ZoomSetting = ZoomSetting.PageWidth
 
   store: BehaviorSubject<any>
   isDirty$: Observable<boolean>
@@ -141,12 +153,12 @@ export class DocumentDetailComponent
 
   ogDate: Date
 
-  customFields: PaperlessCustomField[]
-  public readonly PaperlessCustomFieldDataType = PaperlessCustomFieldDataType
+  customFields: CustomField[]
+  public readonly PaperlessCustomFieldDataType = CustomFieldDataType
 
   @ViewChild('nav') nav: NgbNav
   @ViewChild('pdfPreview') set pdfPreview(element) {
-    // this gets called when compontent added or removed from DOM
+    // this gets called when component added or removed from DOM
     if (
       element &&
       element.nativeElement.offsetParent !== null &&
@@ -246,6 +258,13 @@ export class DocumentDetailComponent
 
     this.route.paramMap
       .pipe(
+        filter((paramMap) => {
+          // only init when changing docs & section is set
+          return (
+            +paramMap.get('id') !== this.documentId &&
+            paramMap.get('section')?.length > 0
+          )
+        }),
         takeUntil(this.unsubscribeNotifier),
         switchMap((paramMap) => {
           const documentId = +paramMap.get('id')
@@ -278,7 +297,23 @@ export class DocumentDetailComponent
           const openDocument = this.openDocumentService.getOpenDocument(
             this.documentId
           )
+
           if (openDocument) {
+            if (
+              new Date(doc.modified) > new Date(openDocument.modified) &&
+              !this.modalService.hasOpenModals()
+            ) {
+              let modal = this.modalService.open(ConfirmDialogComponent)
+              modal.componentInstance.title = $localize`Document changes detected`
+              modal.componentInstance.messageBold = $localize`The version of this document in your browser session appears older than the existing version.`
+              modal.componentInstance.message = $localize`Saving the document here may overwrite other changes that were made. To restore the existing version, discard your changes or close the document.`
+              modal.componentInstance.cancelBtnClass = 'visually-hidden'
+              modal.componentInstance.btnCaption = $localize`Ok`
+              modal.componentInstance.confirmClicked.subscribe(() =>
+                modal.close()
+              )
+            }
+
             if (this.documentForm.dirty) {
               Object.assign(openDocument, this.documentForm.value)
               openDocument['owner'] =
@@ -305,7 +340,7 @@ export class DocumentDetailComponent
             .subscribe({
               next: (titleValue) => {
                 // In the rare case when the field changed just after debounced event was fired.
-                // We dont want to overwrite whats actually in the text field, so just return
+                // We dont want to overwrite what's actually in the text field, so just return
                 if (titleValue !== this.titleInput.value) return
 
                 this.title = titleValue
@@ -395,14 +430,17 @@ export class DocumentDetailComponent
       ])
   }
 
-  updateComponent(doc: PaperlessDocument) {
+  updateComponent(doc: Document) {
     this.document = doc
     this.requiresPassword = false
-    // this.customFields = doc.custom_fields.concat([])
     this.updateFormForCustomFields()
     this.documentsService
       .getMetadata(doc.id)
-      .pipe(first())
+      .pipe(
+        first(),
+        takeUntil(this.unsubscribeNotifier),
+        takeUntil(this.docChangeNotifier)
+      )
       .subscribe({
         next: (result) => {
           this.metadata = result
@@ -423,7 +461,11 @@ export class DocumentDetailComponent
     ) {
       this.documentsService
         .getSuggestions(doc.id)
-        .pipe(first(), takeUntil(this.unsubscribeNotifier))
+        .pipe(
+          first(),
+          takeUntil(this.unsubscribeNotifier),
+          takeUntil(this.docChangeNotifier)
+        )
         .subscribe({
           next: (result) => {
             this.suggestions = result
@@ -744,6 +786,54 @@ export class DocumentDetailComponent
     }
   }
 
+  onZoomSelect(event: Event) {
+    const setting = (event.target as HTMLSelectElement)?.value as ZoomSetting
+    if (ZoomSetting.PageFit === setting) {
+      this.previewZoomSetting = ZoomSetting.One
+      this.previewZoomScale = setting
+    } else {
+      this.previewZoomScale = ZoomSetting.PageWidth
+      this.previewZoomSetting = setting
+    }
+  }
+
+  get zoomSettings() {
+    return Object.values(ZoomSetting).filter(
+      (setting) => setting !== ZoomSetting.PageWidth
+    )
+  }
+
+  getZoomSettingTitle(setting: ZoomSetting): string {
+    switch (setting) {
+      case ZoomSetting.PageFit:
+        return $localize`Page Fit`
+      default:
+        return `${parseFloat(setting) * 100}%`
+    }
+  }
+
+  increaseZoom(): void {
+    let currentIndex = Object.values(ZoomSetting).indexOf(
+      this.previewZoomSetting
+    )
+    if (this.previewZoomScale === ZoomSetting.PageFit) currentIndex = 5
+    this.previewZoomScale = ZoomSetting.PageWidth
+    this.previewZoomSetting =
+      Object.values(ZoomSetting)[
+        Math.min(Object.values(ZoomSetting).length - 1, currentIndex + 1)
+      ]
+  }
+
+  decreaseZoom(): void {
+    let currentIndex = Object.values(ZoomSetting).indexOf(
+      this.previewZoomSetting
+    )
+    if (this.previewZoomScale === ZoomSetting.PageFit) currentIndex = 4
+    this.previewZoomScale = ZoomSetting.PageWidth
+    this.previewZoomSetting =
+      Object.values(ZoomSetting)[Math.max(2, currentIndex - 1)]
+  }
+
   get showPermissions(): boolean {
     return (
       this.permissionsService.currentUserCan(
@@ -763,25 +853,31 @@ export class DocumentDetailComponent
     )
   }
 
-  notesUpdated(notes: PaperlessDocumentNote[]) {
+  notesUpdated(notes: DocumentNote[]) {
     this.document.notes = notes
     this.openDocumentService.refreshDocument(this.documentId)
   }
 
   get userIsOwner(): boolean {
-    let doc: PaperlessDocument = Object.assign({}, this.document)
+    let doc: Document = Object.assign({}, this.document)
     // dont disable while editing
-    if (this.document && this.store?.value.permissions_form?.owner) {
-      doc.owner = this.store?.value.permissions_form?.owner
+    if (
+      this.document &&
+      this.store?.value.permissions_form?.hasOwnProperty('owner')
+    ) {
+      doc.owner = this.store.value.permissions_form.owner
     }
     return !this.document || this.permissionsService.currentUserOwnsObject(doc)
   }
 
   get userCanEdit(): boolean {
-    let doc: PaperlessDocument = Object.assign({}, this.document)
+    let doc: Document = Object.assign({}, this.document)
     // dont disable while editing
-    if (this.document && this.store?.value.permissions_form?.owner) {
-      doc.owner = this.store?.value.permissions_form?.owner
+    if (
+      this.document &&
+      this.store?.value.permissions_form?.hasOwnProperty('owner')
+    ) {
+      doc.owner = this.store.value.permissions_form.owner
     }
     return (
       !this.document ||
@@ -815,25 +911,25 @@ export class DocumentDetailComponent
         // Correspondent
         return {
           rule_type: FILTER_CORRESPONDENT,
-          value: (i as PaperlessCorrespondent).id.toString(),
+          value: (i as Correspondent).id.toString(),
         }
       } else if (i.hasOwnProperty('path')) {
         // Storage Path
         return {
           rule_type: FILTER_STORAGE_PATH,
-          value: (i as PaperlessStoragePath).id.toString(),
+          value: (i as StoragePath).id.toString(),
         }
       } else if (i.hasOwnProperty('is_inbox_tag')) {
         // Tag
         return {
           rule_type: FILTER_HAS_TAGS_ALL,
-          value: (i as PaperlessTag).id.toString(),
+          value: (i as Tag).id.toString(),
         }
       } else {
         // Document Type, has no specific props
         return {
           rule_type: FILTER_DOCUMENT_TYPE,
-          value: (i as PaperlessDocumentType).id.toString(),
+          value: (i as DocumentType).id.toString(),
         }
       }
     })
@@ -854,8 +950,8 @@ export class DocumentDetailComponent
   }
 
   public getCustomFieldFromInstance(
-    instance: PaperlessCustomFieldInstance
-  ): PaperlessCustomField {
+    instance: CustomFieldInstance
+  ): CustomField {
     return this.customFields?.find((f) => f.id === instance.field)
   }
 
@@ -879,7 +975,7 @@ export class DocumentDetailComponent
     })
   }
 
-  public addField(field: PaperlessCustomField) {
+  public addField(field: CustomField) {
     this.document.custom_fields.push({
       field: field.id,
       value: null,
@@ -889,7 +985,7 @@ export class DocumentDetailComponent
     this.updateFormForCustomFields(true)
   }
 
-  public removeField(fieldInstance: PaperlessCustomFieldInstance) {
+  public removeField(fieldInstance: CustomFieldInstance) {
     this.document.custom_fields.splice(
       this.document.custom_fields.indexOf(fieldInstance),
       1

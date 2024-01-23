@@ -9,6 +9,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 from typing import Callable
+from typing import Optional
 from typing import Union
 from unittest import mock
 
@@ -23,6 +24,7 @@ from django.test import override_settings
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.parsers import ParseError
+from documents.plugins.helpers import ProgressStatusOptions
 
 
 def setup_directories():
@@ -146,6 +148,11 @@ def util_call_with_backoff(
 
 
 class DirectoriesMixin:
+    """
+    Creates and overrides settings for all folders and paths, then ensures
+    they are cleaned up on exit
+    """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dirs = None
@@ -160,6 +167,10 @@ class DirectoriesMixin:
 
 
 class FileSystemAssertsMixin:
+    """
+    Utilities for checks various state information of the file system
+    """
+
     def assertIsFile(self, path: Union[PathLike, str]):
         self.assertTrue(Path(path).resolve().is_file(), f"File does not exist: {path}")
 
@@ -188,6 +199,11 @@ class FileSystemAssertsMixin:
 
 
 class ConsumerProgressMixin:
+    """
+    Mocks the Consumer _send_progress, preventing attempts to connect to Redis
+    and allowing access to its calls for verification
+    """
+
     def setUp(self) -> None:
         self.send_progress_patcher = mock.patch(
             "documents.consumer.Consumer._send_progress",
@@ -235,8 +251,10 @@ class DocumentConsumeDelayMixin:
         """
         Iterates over all calls to the async task and returns the arguments
         """
+        # Must be at least 1 call
+        self.consume_file_mock.assert_called()
 
-        for args, _ in self.consume_file_mock.call_args_list:
+        for args, kwargs in self.consume_file_mock.call_args_list:
             input_doc, overrides = args
 
             yield (input_doc, overrides)
@@ -244,7 +262,7 @@ class DocumentConsumeDelayMixin:
     def get_specific_consume_delay_call_args(
         self,
         index: int,
-    ) -> Iterator[tuple[ConsumableDocument, DocumentMetadataOverrides]]:
+    ) -> tuple[ConsumableDocument, DocumentMetadataOverrides]:
         """
         Returns the arguments of a specific call to the async task
         """
@@ -263,6 +281,7 @@ class TestMigrations(TransactionTestCase):
         return apps.get_containing_app_config(type(self).__module__).name
 
     migrate_from = None
+    dependencies = None
     migrate_to = None
     auto_migrate = True
 
@@ -275,6 +294,8 @@ class TestMigrations(TransactionTestCase):
             type(self).__name__,
         )
         self.migrate_from = [(self.app, self.migrate_from)]
+        if self.dependencies is not None:
+            self.migrate_from.extend(self.dependencies)
         self.migrate_to = [(self.app, self.migrate_to)]
         executor = MigrationExecutor(connection)
         old_apps = executor.loader.project_state(self.migrate_from).apps
@@ -299,3 +320,65 @@ class TestMigrations(TransactionTestCase):
 
     def setUpBeforeMigration(self, apps):
         pass
+
+
+class SampleDirMixin:
+    SAMPLE_DIR = Path(__file__).parent / "samples"
+
+    BARCODE_SAMPLE_DIR = SAMPLE_DIR / "barcodes"
+
+
+class DummyProgressManager:
+    """
+    A dummy handler for progress management that doesn't actually try to
+    connect to Redis.  Payloads are stored for test assertions if needed.
+
+    Use it with
+      mock.patch("documents.tasks.ProgressManager", DummyProgressManager)
+    """
+
+    def __init__(self, filename: str, task_id: Optional[str] = None) -> None:
+        self.filename = filename
+        self.task_id = task_id
+        print("hello world")
+        self.payloads = []
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def send_progress(
+        self,
+        status: ProgressStatusOptions,
+        message: str,
+        current_progress: int,
+        max_progress: int,
+        extra_args: Optional[dict[str, Union[str, int]]] = None,
+    ) -> None:
+        # Ensure the layer is open
+        self.open()
+
+        payload = {
+            "type": "status_update",
+            "data": {
+                "filename": self.filename,
+                "task_id": self.task_id,
+                "current_progress": current_progress,
+                "max_progress": max_progress,
+                "status": status,
+                "message": message,
+            },
+        }
+        if extra_args is not None:
+            payload["data"].update(extra_args)
+
+        self.payloads.append(payload)

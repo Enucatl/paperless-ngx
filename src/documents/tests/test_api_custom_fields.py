@@ -34,7 +34,9 @@ class TestCustomField(DirectoriesMixin, APITestCase):
             ("date", "Invoiced Date"),
             ("integer", "Invoice #"),
             ("boolean", "Is Active"),
-            ("float", "Total Paid"),
+            ("float", "Average Value"),
+            ("monetary", "Total Paid"),
+            ("documentlink", "Related Documents"),
         ]:
             resp = self.client.post(
                 self.ENDPOINT,
@@ -68,6 +70,12 @@ class TestCustomField(DirectoriesMixin, APITestCase):
             checksum="123",
             mime_type="application/pdf",
         )
+        doc2 = Document.objects.create(
+            title="WOW2",
+            content="the content2",
+            checksum="1234",
+            mime_type="application/pdf",
+        )
         custom_field_string = CustomField.objects.create(
             name="Test Custom Field String",
             data_type=CustomField.FieldDataType.STRING,
@@ -95,6 +103,10 @@ class TestCustomField(DirectoriesMixin, APITestCase):
         custom_field_monetary = CustomField.objects.create(
             name="Test Custom Field Monetary",
             data_type=CustomField.FieldDataType.MONETARY,
+        )
+        custom_field_documentlink = CustomField.objects.create(
+            name="Test Custom Field Doc Link",
+            data_type=CustomField.FieldDataType.DOCUMENTLINK,
         )
 
         date_value = date.today()
@@ -131,6 +143,10 @@ class TestCustomField(DirectoriesMixin, APITestCase):
                         "field": custom_field_monetary.id,
                         "value": 11.10,
                     },
+                    {
+                        "field": custom_field_documentlink.id,
+                        "value": [doc2.id],
+                    },
                 ],
             },
             format="json",
@@ -150,11 +166,12 @@ class TestCustomField(DirectoriesMixin, APITestCase):
                 {"field": custom_field_url.id, "value": "https://example.com"},
                 {"field": custom_field_float.id, "value": 12.3456},
                 {"field": custom_field_monetary.id, "value": 11.10},
+                {"field": custom_field_documentlink.id, "value": [doc2.id]},
             ],
         )
 
         doc.refresh_from_db()
-        self.assertEqual(len(doc.custom_fields.all()), 7)
+        self.assertEqual(len(doc.custom_fields.all()), 8)
 
     def test_change_custom_field_instance_value(self):
         """
@@ -316,19 +333,17 @@ class TestCustomField(DirectoriesMixin, APITestCase):
             },
             format="json",
         )
-        from pprint import pprint
 
-        pprint(resp.json())
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(CustomFieldInstance.objects.count(), 0)
         self.assertEqual(len(doc.custom_fields.all()), 0)
 
-    def test_custom_field_value_validation(self):
+    def test_custom_field_value_url_validation(self):
         """
         GIVEN:
             - Document & custom field exist
         WHEN:
-            - API request to set a field value
+            - API request to set a field value to something which is or is not a link
         THEN:
             - HTTP 400 is returned
             - No field instance is created or attached to the document
@@ -343,31 +358,62 @@ class TestCustomField(DirectoriesMixin, APITestCase):
             name="Test Custom Field URL",
             data_type=CustomField.FieldDataType.URL,
         )
-        custom_field_int = CustomField.objects.create(
-            name="Test Custom Field INT",
-            data_type=CustomField.FieldDataType.INT,
-        )
 
+        for value in ["not a url", "file:"]:
+            with self.subTest(f"Test value {value}"):
+                resp = self.client.patch(
+                    f"/api/documents/{doc.id}/",
+                    data={
+                        "custom_fields": [
+                            {
+                                "field": custom_field_url.id,
+                                "value": value,
+                            },
+                        ],
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(CustomFieldInstance.objects.count(), 0)
+                self.assertEqual(len(doc.custom_fields.all()), 0)
         resp = self.client.patch(
             f"/api/documents/{doc.id}/",
             data={
                 "custom_fields": [
                     {
                         "field": custom_field_url.id,
-                        "value": "not a url",
+                        "value": "tel:+1-816-555-1212",
                     },
                 ],
             },
             format="json",
         )
 
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(CustomFieldInstance.objects.count(), 0)
-        self.assertEqual(len(doc.custom_fields.all()), 0)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
-        self.assertRaises(
-            Exception,
-            self.client.patch,
+    def test_custom_field_value_integer_validation(self):
+        """
+        GIVEN:
+            - Document & custom field exist
+        WHEN:
+            - API request to set a field value to something not an integer
+        THEN:
+            - HTTP 400 is returned
+            - No field instance is created or attached to the document
+        """
+        doc = Document.objects.create(
+            title="WOW",
+            content="the content",
+            checksum="123",
+            mime_type="application/pdf",
+        )
+        custom_field_int = CustomField.objects.create(
+            name="Test Custom Field INT",
+            data_type=CustomField.FieldDataType.INT,
+        )
+
+        resp = self.client.patch(
             f"/api/documents/{doc.id}/",
             data={
                 "custom_fields": [
@@ -380,5 +426,275 @@ class TestCustomField(DirectoriesMixin, APITestCase):
             format="json",
         )
 
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(CustomFieldInstance.objects.count(), 0)
         self.assertEqual(len(doc.custom_fields.all()), 0)
+
+    def test_custom_field_value_monetary_validation(self):
+        """
+        GIVEN:
+            - Document & custom field exist
+        WHEN:
+            - API request to set a field value to something not a valid monetary decimal
+        THEN:
+            - HTTP 400 is returned
+            - No field instance is created or attached to the document
+        """
+        doc = Document.objects.create(
+            title="WOW",
+            content="the content",
+            checksum="123",
+            mime_type="application/pdf",
+        )
+        custom_field_money = CustomField.objects.create(
+            name="Test Custom Field MONETARY",
+            data_type=CustomField.FieldDataType.MONETARY,
+        )
+
+        resp = self.client.patch(
+            f"/api/documents/{doc.id}/",
+            data={
+                "custom_fields": [
+                    {
+                        "field": custom_field_money.id,
+                        # Too many places past decimal
+                        "value": 12.123,
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CustomFieldInstance.objects.count(), 0)
+        self.assertEqual(len(doc.custom_fields.all()), 0)
+
+    def test_custom_field_value_short_text_validation(self):
+        """
+        GIVEN:
+            - Document & custom field exist
+        WHEN:
+            - API request to set a field value to a too long string
+        THEN:
+            - HTTP 400 is returned
+            - No field instance is created or attached to the document
+        """
+        doc = Document.objects.create(
+            title="WOW",
+            content="the content",
+            checksum="123",
+            mime_type="application/pdf",
+        )
+        custom_field_string = CustomField.objects.create(
+            name="Test Custom Field STRING",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+
+        resp = self.client.patch(
+            f"/api/documents/{doc.id}/",
+            data={
+                "custom_fields": [
+                    {"field": custom_field_string.id, "value": "a" * 129},
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CustomFieldInstance.objects.count(), 0)
+        self.assertEqual(len(doc.custom_fields.all()), 0)
+
+    def test_custom_field_not_null(self):
+        """
+        GIVEN:
+            - Existing document
+        WHEN:
+            - API request with custom_fields set to null
+        THEN:
+            - HTTP 400 is returned
+        """
+        doc = Document.objects.create(
+            title="WOW",
+            content="the content",
+            checksum="123",
+            mime_type="application/pdf",
+        )
+
+        resp = self.client.patch(
+            f"/api/documents/{doc.id}/",
+            data={
+                "custom_fields": None,
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_symmetric_doclink_fields(self):
+        """
+        GIVEN:
+            - Existing document
+        WHEN:
+            - Doc links are added or removed
+        THEN:
+            - Symmetrical link is created or removed as expected
+        """
+        doc1 = Document.objects.create(
+            title="WOW1",
+            content="1",
+            checksum="1",
+            mime_type="application/pdf",
+        )
+        doc2 = Document.objects.create(
+            title="WOW2",
+            content="the content2",
+            checksum="2",
+            mime_type="application/pdf",
+        )
+        doc3 = Document.objects.create(
+            title="WOW3",
+            content="the content3",
+            checksum="3",
+            mime_type="application/pdf",
+        )
+        doc4 = Document.objects.create(
+            title="WOW4",
+            content="the content4",
+            checksum="4",
+            mime_type="application/pdf",
+        )
+        custom_field_doclink = CustomField.objects.create(
+            name="Test Custom Field Doc Link",
+            data_type=CustomField.FieldDataType.DOCUMENTLINK,
+        )
+
+        # Add links, creates bi-directional
+        resp = self.client.patch(
+            f"/api/documents/{doc1.id}/",
+            data={
+                "custom_fields": [
+                    {
+                        "field": custom_field_doclink.id,
+                        "value": [2, 3, 4],
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(CustomFieldInstance.objects.count(), 4)
+        self.assertEqual(doc2.custom_fields.first().value, [1])
+        self.assertEqual(doc3.custom_fields.first().value, [1])
+        self.assertEqual(doc4.custom_fields.first().value, [1])
+
+        # Add links appends if necessary
+        resp = self.client.patch(
+            f"/api/documents/{doc3.id}/",
+            data={
+                "custom_fields": [
+                    {
+                        "field": custom_field_doclink.id,
+                        "value": [1, 4],
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(doc4.custom_fields.first().value, [1, 3])
+
+        # Remove one of the links, removed on other doc
+        resp = self.client.patch(
+            f"/api/documents/{doc1.id}/",
+            data={
+                "custom_fields": [
+                    {
+                        "field": custom_field_doclink.id,
+                        "value": [2, 3],
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(doc2.custom_fields.first().value, [1])
+        self.assertEqual(doc3.custom_fields.first().value, [1, 4])
+        self.assertEqual(doc4.custom_fields.first().value, [3])
+
+        # Removes the field entirely
+        resp = self.client.patch(
+            f"/api/documents/{doc1.id}/",
+            data={
+                "custom_fields": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(doc2.custom_fields.first().value, [])
+        self.assertEqual(doc3.custom_fields.first().value, [4])
+        self.assertEqual(doc4.custom_fields.first().value, [3])
+
+        # If field exists on target doc but value is None
+        doc5 = Document.objects.create(
+            title="WOW5",
+            content="the content4",
+            checksum="5",
+            mime_type="application/pdf",
+        )
+        CustomFieldInstance.objects.create(document=doc5, field=custom_field_doclink)
+
+        resp = self.client.patch(
+            f"/api/documents/{doc1.id}/",
+            data={
+                "custom_fields": [
+                    {
+                        "field": custom_field_doclink.id,
+                        "value": [doc5.id],
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(doc5.custom_fields.first().value, [1])
+
+    def test_custom_field_filters(self):
+        custom_field_string = CustomField.objects.create(
+            name="Test Custom Field String",
+            data_type=CustomField.FieldDataType.STRING,
+        )
+        custom_field_date = CustomField.objects.create(
+            name="Test Custom Field Date",
+            data_type=CustomField.FieldDataType.DATE,
+        )
+        custom_field_int = CustomField.objects.create(
+            name="Test Custom Field Int",
+            data_type=CustomField.FieldDataType.INT,
+        )
+
+        response = self.client.get(
+            f"{self.ENDPOINT}?id={custom_field_string.id}",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+
+        response = self.client.get(
+            f"{self.ENDPOINT}?id__in={custom_field_string.id},{custom_field_date.id}",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 2)
+
+        response = self.client.get(
+            f"{self.ENDPOINT}?name__icontains=Int",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["name"], custom_field_int.name)

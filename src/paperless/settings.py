@@ -57,6 +57,15 @@ def __get_int(key: str, default: int) -> int:
     return int(os.getenv(key, default))
 
 
+def __get_optional_int(key: str) -> Optional[int]:
+    """
+    Returns None if the environment key is not present, otherwise an integer
+    """
+    if key in os.environ:
+        return __get_int(key, -1)  # pragma: no cover
+    return None
+
+
 def __get_float(key: str, default: float) -> float:
     """
     Return an integer value based on the environment variable or a default
@@ -66,18 +75,24 @@ def __get_float(key: str, default: float) -> float:
 
 def __get_path(
     key: str,
-    default: Optional[Union[PathLike, str]] = None,
-) -> Optional[Path]:
+    default: Union[PathLike, str],
+) -> Path:
     """
     Return a normalized, absolute path based on the environment variable or a default,
-    if provided.  If not set and no default, returns None
+    if provided
     """
     if key in os.environ:
         return Path(os.environ[key]).resolve()
-    elif default is not None:
-        return Path(default).resolve()
-    else:
-        return None
+    return Path(default).resolve()
+
+
+def __get_optional_path(key: str) -> Optional[Path]:
+    """
+    Returns None if the environment key is not present, otherwise a fully resolved Path
+    """
+    if key in os.environ:
+        return __get_path(key, "")
+    return None
 
 
 def __get_list(
@@ -297,14 +312,14 @@ if DEBUG:
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.BasicAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.AcceptHeaderVersioning",
     "DEFAULT_VERSION": "1",
     # Make sure these are ordered and that the most recent version appears
     # last
-    "ALLOWED_VERSIONS": ["1", "2", "3"],
+    "ALLOWED_VERSIONS": ["1", "2", "3", "4"],
 }
 
 if DEBUG:
@@ -327,7 +342,7 @@ MIDDLEWARE = [
 ]
 
 # Optional to enable compression
-if __get_boolean("PAPERLESS_ENABLE_COMPRESSION", "yes"):  # pragma: nocover
+if __get_boolean("PAPERLESS_ENABLE_COMPRESSION", "yes"):  # pragma: no cover
     MIDDLEWARE.insert(0, "compression_middleware.middleware.CompressionMiddleware")
 
 ROOT_URLCONF = "paperless.urls"
@@ -352,6 +367,7 @@ STORAGES = {
     "staticfiles": {
         "BACKEND": _static_backend,
     },
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
 }
 
 _CELERY_REDIS_URL, _CHANNELS_REDIS_URL = _parse_redis_url(
@@ -404,18 +420,30 @@ if AUTO_LOGIN_USERNAME:
     # regular login in case the provided user does not exist.
     MIDDLEWARE.insert(_index + 1, "paperless.auth.AutoLoginMiddleware")
 
-ENABLE_HTTP_REMOTE_USER = __get_boolean("PAPERLESS_ENABLE_HTTP_REMOTE_USER")
-HTTP_REMOTE_USER_HEADER_NAME = os.getenv(
-    "PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME",
-    "HTTP_REMOTE_USER",
-)
 
-if ENABLE_HTTP_REMOTE_USER:
-    MIDDLEWARE.append("paperless.auth.HttpRemoteUserMiddleware")
-    AUTHENTICATION_BACKENDS.insert(0, "django.contrib.auth.backends.RemoteUserBackend")
-    REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].append(
-        "rest_framework.authentication.RemoteUserAuthentication",
+def _parse_remote_user_settings() -> str:
+    global MIDDLEWARE, AUTHENTICATION_BACKENDS, REST_FRAMEWORK
+    enable = __get_boolean("PAPERLESS_ENABLE_HTTP_REMOTE_USER")
+    if enable:
+        MIDDLEWARE.append("paperless.auth.HttpRemoteUserMiddleware")
+        AUTHENTICATION_BACKENDS.insert(
+            0,
+            "django.contrib.auth.backends.RemoteUserBackend",
+        )
+        REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].insert(
+            0,
+            "paperless.auth.PaperlessRemoteUserAuthentication",
+        )
+
+    header_name = os.getenv(
+        "PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME",
+        "HTTP_REMOTE_USER",
     )
+
+    return header_name
+
+
+HTTP_REMOTE_USER_HEADER_NAME = _parse_remote_user_settings()
 
 # X-Frame options for embedded PDF display:
 X_FRAME_OPTIONS = "ANY" if DEBUG else "SAMEORIGIN"
@@ -484,8 +512,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Disable Django's artificial limit on the number of form fields to submit at
 # once. This is a protection against overloading the server, but since this is
-# a self-hosted sort of gig, the benefits of being able to mass-delete a tonne
-# of log entries outweight the benefits of such a safeguard.
+# a self-hosted sort of gig, the benefits of being able to mass-delete a ton
+# of log entries outweigh the benefits of such a safeguard.
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 
@@ -495,7 +523,7 @@ CSRF_COOKIE_NAME = f"{COOKIE_PREFIX}csrftoken"
 SESSION_COOKIE_NAME = f"{COOKIE_PREFIX}sessionid"
 LANGUAGE_COOKIE_NAME = f"{COOKIE_PREFIX}django_language"
 
-EMAIL_CERTIFICATE_FILE = __get_path("PAPERLESS_EMAIL_CERTIFICATE_LOCATION")
+EMAIL_CERTIFICATE_FILE = __get_optional_path("PAPERLESS_EMAIL_CERTIFICATE_LOCATION")
 
 
 ###############################################################################
@@ -796,11 +824,10 @@ CONSUMER_BARCODE_STRING: Final[str] = os.getenv(
     "PATCHT",
 )
 
-consumer_barcode_scanner_tmp: Final[str] = os.getenv(
+CONSUMER_BARCODE_SCANNER: Final[str] = os.getenv(
     "PAPERLESS_CONSUMER_BARCODE_SCANNER",
     "PYZBAR",
-)
-CONSUMER_BARCODE_SCANNER = consumer_barcode_scanner_tmp.upper()
+).upper()
 
 CONSUMER_ENABLE_ASN_BARCODE: Final[bool] = __get_boolean(
     "PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE",
@@ -811,15 +838,12 @@ CONSUMER_ASN_BARCODE_PREFIX: Final[str] = os.getenv(
     "ASN",
 )
 
-
-CONSUMER_BARCODE_UPSCALE: Final[float] = float(
-    os.getenv("PAPERLESS_CONSUMER_BARCODE_UPSCALE", 0.0),
+CONSUMER_BARCODE_UPSCALE: Final[float] = __get_float(
+    "PAPERLESS_CONSUMER_BARCODE_UPSCALE",
+    0.0,
 )
 
-
-CONSUMER_BARCODE_DPI: Final[str] = int(
-    os.getenv("PAPERLESS_CONSUMER_BARCODE_DPI", 300),
-)
+CONSUMER_BARCODE_DPI: Final[int] = __get_int("PAPERLESS_CONSUMER_BARCODE_DPI", 300)
 
 CONSUMER_ENABLE_COLLATE_DOUBLE_SIDED: Final[bool] = __get_boolean(
     "PAPERLESS_CONSUMER_ENABLE_COLLATE_DOUBLE_SIDED",
@@ -834,7 +858,7 @@ CONSUMER_COLLATE_DOUBLE_SIDED_TIFF_SUPPORT: Final[bool] = __get_boolean(
     "PAPERLESS_CONSUMER_COLLATE_DOUBLE_SIDED_TIFF_SUPPORT",
 )
 
-OCR_PAGES = int(os.getenv("PAPERLESS_OCR_PAGES", 0))
+OCR_PAGES = __get_optional_int("PAPERLESS_OCR_PAGES")
 
 # The default language that tesseract will attempt to use when parsing
 # documents.  It should be a 3-letter language code consistent with ISO 639.
@@ -848,23 +872,29 @@ OCR_MODE = os.getenv("PAPERLESS_OCR_MODE", "skip")
 
 OCR_SKIP_ARCHIVE_FILE = os.getenv("PAPERLESS_OCR_SKIP_ARCHIVE_FILE", "never")
 
-OCR_IMAGE_DPI = os.getenv("PAPERLESS_OCR_IMAGE_DPI")
+OCR_IMAGE_DPI = __get_optional_int("PAPERLESS_OCR_IMAGE_DPI")
 
 OCR_CLEAN = os.getenv("PAPERLESS_OCR_CLEAN", "clean")
 
-OCR_DESKEW = __get_boolean("PAPERLESS_OCR_DESKEW", "true")
+OCR_DESKEW: Final[bool] = __get_boolean("PAPERLESS_OCR_DESKEW", "true")
 
-OCR_ROTATE_PAGES = __get_boolean("PAPERLESS_OCR_ROTATE_PAGES", "true")
+OCR_ROTATE_PAGES: Final[bool] = __get_boolean("PAPERLESS_OCR_ROTATE_PAGES", "true")
 
-OCR_ROTATE_PAGES_THRESHOLD = float(
-    os.getenv("PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD", 12.0),
+OCR_ROTATE_PAGES_THRESHOLD: Final[float] = __get_float(
+    "PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD",
+    12.0,
 )
 
-OCR_MAX_IMAGE_PIXELS: Optional[int] = None
-if os.environ.get("PAPERLESS_OCR_MAX_IMAGE_PIXELS") is not None:
-    OCR_MAX_IMAGE_PIXELS: int = int(os.environ.get("PAPERLESS_OCR_MAX_IMAGE_PIXELS"))
+OCR_MAX_IMAGE_PIXELS: Final[Optional[int]] = __get_optional_int(
+    "PAPERLESS_OCR_MAX_IMAGE_PIXELS",
+)
 
-OCR_USER_ARGS = os.getenv("PAPERLESS_OCR_USER_ARGS", "{}")
+OCR_COLOR_CONVERSION_STRATEGY = os.getenv(
+    "PAPERLESS_OCR_COLOR_CONVERSION_STRATEGY",
+    "RGB",
+)
+
+OCR_USER_ARGS = os.getenv("PAPERLESS_OCR_USER_ARGS")
 
 # GNUPG needs a home directory for some reason
 GNUPG_HOME = os.getenv("HOME", "/tmp")
@@ -982,6 +1012,9 @@ ENABLE_UPDATE_CHECK = os.getenv("PAPERLESS_ENABLE_UPDATE_CHECK", "default")
 if ENABLE_UPDATE_CHECK != "default":
     ENABLE_UPDATE_CHECK = __get_boolean("PAPERLESS_ENABLE_UPDATE_CHECK")
 
+APP_TITLE = os.getenv("PAPERLESS_APP_TITLE", None)
+APP_LOGO = os.getenv("PAPERLESS_APP_LOGO", None)
+
 ###############################################################################
 # Machine Learning                                                            #
 ###############################################################################
@@ -1031,6 +1064,7 @@ EMAIL_HOST: Final[str] = os.getenv("PAPERLESS_EMAIL_HOST", "localhost")
 EMAIL_PORT: Final[int] = int(os.getenv("PAPERLESS_EMAIL_PORT", 25))
 EMAIL_HOST_USER: Final[str] = os.getenv("PAPERLESS_EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD: Final[str] = os.getenv("PAPERLESS_EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL: Final[str] = os.getenv("PAPERLESS_EMAIL_FROM", EMAIL_HOST_USER)
 EMAIL_USE_TLS: Final[bool] = __get_boolean("PAPERLESS_EMAIL_USE_TLS")
 EMAIL_USE_SSL: Final[bool] = __get_boolean("PAPERLESS_EMAIL_USE_SSL")
 EMAIL_SUBJECT_PREFIX: Final[str] = "[Paperless-ngx] "

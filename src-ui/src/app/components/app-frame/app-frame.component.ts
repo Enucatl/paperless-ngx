@@ -8,8 +8,9 @@ import {
   map,
   switchMap,
   first,
+  catchError,
 } from 'rxjs/operators'
-import { PaperlessDocument } from 'src/app/data/paperless-document'
+import { Document } from 'src/app/data/document'
 import { OpenDocumentsService } from 'src/app/services/open-documents.service'
 import { SavedViewService } from 'src/app/services/rest/saved-view.service'
 import { SearchService } from 'src/app/services/rest/search.service'
@@ -24,7 +25,7 @@ import {
 import { SettingsService } from 'src/app/services/settings.service'
 import { TasksService } from 'src/app/services/tasks.service'
 import { ComponentCanDeactivate } from 'src/app/guards/dirty-doc.guard'
-import { SETTINGS_KEYS } from 'src/app/data/paperless-uisettings'
+import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import { ToastService } from 'src/app/services/toast.service'
 import { ComponentWithPermissions } from '../with-permissions/with-permissions.component'
 import {
@@ -32,13 +33,15 @@ import {
   PermissionsService,
   PermissionType,
 } from 'src/app/services/permissions.service'
-import { PaperlessSavedView } from 'src/app/data/paperless-saved-view'
+import { SavedView } from 'src/app/data/saved-view'
 import {
   CdkDragStart,
   CdkDragEnd,
   CdkDragDrop,
   moveItemInArray,
 } from '@angular/cdk/drag-drop'
+import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
+import { ProfileEditDialogComponent } from '../common/profile-edit-dialog/profile-edit-dialog.component'
 
 @Component({
   selector: 'pngx-app-frame',
@@ -69,6 +72,7 @@ export class AppFrameComponent
     public settingsService: SettingsService,
     public tasksService: TasksService,
     private readonly toastService: ToastService,
+    private modalService: NgbModal,
     permissionsService: PermissionsService
   ) {
     super()
@@ -98,6 +102,10 @@ export class AppFrameComponent
     }, 200) // slightly longer than css animation for slim sidebar
   }
 
+  get customAppTitle(): string {
+    return this.settingsService.get(SETTINGS_KEYS.APP_TITLE)
+  }
+
   get slimSidebarEnabled(): boolean {
     return this.settingsService.get(SETTINGS_KEYS.SLIM_SIDEBAR)
   }
@@ -121,7 +129,14 @@ export class AppFrameComponent
     this.isMenuCollapsed = true
   }
 
-  get openDocuments(): PaperlessDocument[] {
+  editProfile() {
+    this.modalService.open(ProfileEditDialogComponent, {
+      backdrop: 'static',
+    })
+    this.closeMenu()
+  }
+
+  get openDocuments(): Document[] {
     return this.openDocumentsService.getOpenDocuments()
   }
 
@@ -156,7 +171,13 @@ export class AppFrameComponent
         }
       }),
       switchMap((term) =>
-        term.length < 2 ? from([[]]) : this.searchService.autocomplete(term)
+        term.length < 2
+          ? from([[]])
+          : this.searchService.autocomplete(term).pipe(
+              catchError(() => {
+                return from([[]])
+              })
+            )
       )
     )
 
@@ -183,7 +204,7 @@ export class AppFrameComponent
     ])
   }
 
-  closeDocument(d: PaperlessDocument) {
+  closeDocument(d: Document) {
     this.openDocumentsService
       .closeDocument(d)
       .pipe(first())
@@ -233,7 +254,7 @@ export class AppFrameComponent
     this.settingsService.globalDropzoneEnabled = true
   }
 
-  onDrop(event: CdkDragDrop<PaperlessSavedView[]>) {
+  onDrop(event: CdkDragDrop<SavedView[]>) {
     const sidebarViews = this.savedViewService.sidebarViews.concat([])
     moveItemInArray(sidebarViews, event.previousIndex, event.currentIndex)
 

@@ -19,7 +19,6 @@ import {
   NgbDateStruct,
 } from '@ng-bootstrap/ng-bootstrap'
 import { NgSelectModule } from '@ng-select/ng-select'
-import { PdfViewerComponent } from 'ng2-pdf-viewer'
 import { of, throwError } from 'rxjs'
 import { routes } from 'src/app/app-routing.module'
 import {
@@ -31,11 +30,11 @@ import {
   FILTER_CREATED_AFTER,
   FILTER_CREATED_BEFORE,
 } from 'src/app/data/filter-rule-type'
-import { PaperlessCorrespondent } from 'src/app/data/paperless-correspondent'
-import { PaperlessDocument } from 'src/app/data/paperless-document'
-import { PaperlessDocumentType } from 'src/app/data/paperless-document-type'
-import { PaperlessStoragePath } from 'src/app/data/paperless-storage-path'
-import { PaperlessTag } from 'src/app/data/paperless-tag'
+import { Correspondent } from 'src/app/data/correspondent'
+import { Document } from 'src/app/data/document'
+import { DocumentType } from 'src/app/data/document-type'
+import { StoragePath } from 'src/app/data/storage-path'
+import { Tag } from 'src/app/data/tag'
 import { IfOwnerDirective } from 'src/app/directives/if-owner.directive'
 import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
 import { PermissionsGuard } from 'src/app/guards/permissions.guard'
@@ -68,10 +67,11 @@ import { DocumentNotesComponent } from '../document-notes/document-notes.compone
 import { DocumentDetailComponent } from './document-detail.component'
 import { ShareLinksDropdownComponent } from '../common/share-links-dropdown/share-links-dropdown.component'
 import { CustomFieldsDropdownComponent } from '../common/custom-fields-dropdown/custom-fields-dropdown.component'
-import { PaperlessCustomFieldDataType } from 'src/app/data/paperless-custom-field'
+import { CustomFieldDataType } from 'src/app/data/custom-field'
 import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
+import { PdfViewerComponent } from '../common/pdf-viewer/pdf-viewer.component'
 
-const doc: PaperlessDocument = {
+const doc: Document = {
   id: 3,
   title: 'Doc 3',
   correspondent: 11,
@@ -79,8 +79,9 @@ const doc: PaperlessDocument = {
   storage_path: 31,
   tags: [41, 42, 43],
   content: 'text content',
-  added: new Date(),
-  created: new Date(),
+  added: new Date('May 4, 2014 03:24:00'),
+  created: new Date('May 4, 2014 03:24:00'),
+  modified: new Date('May 4, 2014 03:24:00'),
   archive_serial_number: null,
   original_file_name: 'file.pdf',
   owner: null,
@@ -111,13 +112,13 @@ const customFields = [
   {
     id: 0,
     name: 'Field 1',
-    data_type: PaperlessCustomFieldDataType.String,
+    data_type: CustomFieldDataType.String,
     created: new Date(),
   },
   {
     id: 1,
     name: 'Custom Field 2',
-    data_type: PaperlessCustomFieldDataType.Integer,
+    data_type: CustomFieldDataType.Integer,
     created: new Date(),
   },
 ]
@@ -160,10 +161,10 @@ describe('DocumentDetailComponent', () => {
         PermissionsFormComponent,
         SafeHtmlPipe,
         ConfirmDialogComponent,
-        PdfViewerComponent,
         SafeUrlPipe,
         ShareLinksDropdownComponent,
         CustomFieldsDropdownComponent,
+        PdfViewerComponent,
       ],
       providers: [
         DocumentTitlePipe,
@@ -254,15 +255,13 @@ describe('DocumentDetailComponent', () => {
 
     router = TestBed.inject(Router)
     activatedRoute = TestBed.inject(ActivatedRoute)
-    jest
-      .spyOn(activatedRoute, 'paramMap', 'get')
-      .mockReturnValue(of(convertToParamMap({ id: 3 })))
     openDocumentsService = TestBed.inject(OpenDocumentsService)
     documentService = TestBed.inject(DocumentService)
     modalService = TestBed.inject(NgbModal)
     toastService = TestBed.inject(ToastService)
     documentListViewService = TestBed.inject(DocumentListViewService)
     settingsService = TestBed.inject(SettingsService)
+    settingsService.currentUser = { id: 1 }
     customFieldsService = TestBed.inject(CustomFieldsService)
     fixture = TestBed.createComponent(DocumentDetailComponent)
     component = fixture.componentInstance
@@ -293,6 +292,17 @@ describe('DocumentDetailComponent', () => {
     expect(navigateSpy).toHaveBeenCalledWith(['documents', 3, 'notes'])
   })
 
+  it('should forward id without section to details', () => {
+    const navigateSpy = jest.spyOn(router, 'navigate')
+    jest
+      .spyOn(activatedRoute, 'paramMap', 'get')
+      .mockReturnValue(of(convertToParamMap({ id: 3 })))
+    fixture.detectChanges()
+    expect(navigateSpy).toHaveBeenCalledWith(['documents', 3, 'details'], {
+      replaceUrl: true,
+    })
+  })
+
   it('should update title after debounce', fakeAsync(() => {
     initNormally()
     component.titleInput.value = 'Foo Bar'
@@ -302,7 +312,7 @@ describe('DocumentDetailComponent', () => {
     discardPeriodicTasks()
   }))
 
-  it('should update title before doc change if wasnt updated via debounce', fakeAsync(() => {
+  it('should update title before doc change if was not updated via debounce', fakeAsync(() => {
     initNormally()
     component.titleInput.value = 'Foo Bar'
     component.titleInput.inputField.nativeElement.dispatchEvent(
@@ -318,6 +328,7 @@ describe('DocumentDetailComponent', () => {
   })
 
   it('should load already-opened document via param', () => {
+    initNormally()
     jest.spyOn(documentService, 'get').mockReturnValueOnce(of(doc))
     jest.spyOn(openDocumentsService, 'getOpenDocument').mockReturnValue(doc)
     jest.spyOn(customFieldsService, 'listAll').mockReturnValue(
@@ -398,8 +409,11 @@ describe('DocumentDetailComponent', () => {
   })
 
   it('should 404 on invalid id', () => {
-    jest.spyOn(documentService, 'get').mockReturnValueOnce(of(null))
     const navigateSpy = jest.spyOn(router, 'navigate')
+    jest
+      .spyOn(activatedRoute, 'paramMap', 'get')
+      .mockReturnValue(of(convertToParamMap({ id: 999, section: 'details' })))
+    jest.spyOn(documentService, 'get').mockReturnValueOnce(of(null))
     fixture.detectChanges()
     expect(navigateSpy).toHaveBeenCalledWith(['404'], { replaceUrl: true })
   })
@@ -682,6 +696,35 @@ describe('DocumentDetailComponent', () => {
     expect(component.previewNumPages).toEqual(1000)
   })
 
+  it('should support zoom controls', () => {
+    initNormally()
+    component.onZoomSelect({ target: { value: '1' } } as any) // from select
+    expect(component.previewZoomSetting).toEqual('1')
+    component.increaseZoom()
+    expect(component.previewZoomSetting).toEqual('1.5')
+    component.increaseZoom()
+    expect(component.previewZoomSetting).toEqual('2')
+    component.decreaseZoom()
+    expect(component.previewZoomSetting).toEqual('1.5')
+    component.onZoomSelect({ target: { value: '1' } } as any) // from select
+    component.decreaseZoom()
+    expect(component.previewZoomSetting).toEqual('.75')
+
+    component.onZoomSelect({ target: { value: 'page-fit' } } as any) // from select
+    expect(component.previewZoomScale).toEqual('page-fit')
+    expect(component.previewZoomSetting).toEqual('1')
+    component.increaseZoom()
+    expect(component.previewZoomSetting).toEqual('1.5')
+    expect(component.previewZoomScale).toEqual('page-width')
+
+    component.onZoomSelect({ target: { value: 'page-fit' } } as any) // from select
+    expect(component.previewZoomScale).toEqual('page-fit')
+    expect(component.previewZoomSetting).toEqual('1')
+    component.decreaseZoom()
+    expect(component.previewZoomSetting).toEqual('.5')
+    expect(component.previewZoomScale).toEqual('page-width')
+  })
+
   it('should support updating notes dynamically', () => {
     const notes = [
       {
@@ -702,7 +745,7 @@ describe('DocumentDetailComponent', () => {
       id: 22,
       name: 'Correspondent22',
       last_correspondence: new Date().toISOString(),
-    } as PaperlessCorrespondent
+    } as Correspondent
     const qfSpy = jest.spyOn(documentListViewService, 'quickFilter')
     component.filterDocuments([object])
     expect(qfSpy).toHaveBeenCalledWith([
@@ -715,7 +758,7 @@ describe('DocumentDetailComponent', () => {
 
   it('should support quick filtering by doc type', () => {
     initNormally()
-    const object = { id: 22, name: 'DocumentType22' } as PaperlessDocumentType
+    const object = { id: 22, name: 'DocumentType22' } as DocumentType
     const qfSpy = jest.spyOn(documentListViewService, 'quickFilter')
     component.filterDocuments([object])
     expect(qfSpy).toHaveBeenCalledWith([
@@ -732,7 +775,7 @@ describe('DocumentDetailComponent', () => {
       id: 22,
       name: 'StoragePath22',
       path: '/foo/bar/',
-    } as PaperlessStoragePath
+    } as StoragePath
     const qfSpy = jest.spyOn(documentListViewService, 'quickFilter')
     component.filterDocuments([object])
     expect(qfSpy).toHaveBeenCalledWith([
@@ -751,14 +794,14 @@ describe('DocumentDetailComponent', () => {
       is_inbox_tag: true,
       color: '#ff0000',
       text_color: '#000000',
-    } as PaperlessTag
+    } as Tag
     const object2 = {
       id: 23,
       name: 'Tag22',
       is_inbox_tag: true,
       color: '#ff0000',
       text_color: '#000000',
-    } as PaperlessTag
+    } as Tag
     const qfSpy = jest.spyOn(documentListViewService, 'quickFilter')
     component.filterDocuments([object1, object2])
     expect(qfSpy).toHaveBeenCalledWith([
@@ -805,7 +848,7 @@ describe('DocumentDetailComponent', () => {
     jest.spyOn(settingsService, 'get').mockReturnValue(false)
     expect(component.useNativePdfViewer).toBeFalsy()
     fixture.detectChanges()
-    expect(fixture.debugElement.query(By.css('pdf-viewer'))).not.toBeNull()
+    expect(fixture.debugElement.query(By.css('pngx-pdf-viewer'))).not.toBeNull()
   })
 
   it('should display native pdf viewer if enabled', () => {
@@ -905,7 +948,56 @@ describe('DocumentDetailComponent', () => {
     expect(refreshSpy).toHaveBeenCalled()
   })
 
+  it('should get suggestions', () => {
+    const suggestionsSpy = jest.spyOn(documentService, 'getSuggestions')
+    suggestionsSpy.mockReturnValue(of({ tags: [1, 2] }))
+    initNormally()
+    expect(suggestionsSpy).toHaveBeenCalled()
+    expect(component.suggestions).toEqual({ tags: [1, 2] })
+  })
+
+  it('should show error if needed for get suggestions', () => {
+    const suggestionsSpy = jest.spyOn(documentService, 'getSuggestions')
+    const errorSpy = jest.spyOn(toastService, 'showError')
+    suggestionsSpy.mockImplementationOnce(() =>
+      throwError(() => new Error('failed to get suggestions'))
+    )
+    initNormally()
+    expect(suggestionsSpy).toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalled()
+  })
+
+  it('should warn when open document does not match doc retrieved from backend on init', () => {
+    let openModal: NgbModalRef
+    modalService.activeInstances.subscribe((modals) => (openModal = modals[0]))
+    const modalSpy = jest.spyOn(modalService, 'open')
+    const openDoc = Object.assign({}, doc)
+    // simulate a document being modified elsewhere and db updated
+    doc.modified = new Date()
+    jest
+      .spyOn(activatedRoute, 'paramMap', 'get')
+      .mockReturnValue(of(convertToParamMap({ id: 3, section: 'details' })))
+    jest.spyOn(documentService, 'get').mockReturnValueOnce(of(doc))
+    jest.spyOn(openDocumentsService, 'getOpenDocument').mockReturnValue(openDoc)
+    jest.spyOn(customFieldsService, 'listAll').mockReturnValue(
+      of({
+        count: customFields.length,
+        all: customFields.map((f) => f.id),
+        results: customFields,
+      })
+    )
+    fixture.detectChanges() // calls ngOnInit
+    expect(modalSpy).toHaveBeenCalledWith(ConfirmDialogComponent)
+    const closeSpy = jest.spyOn(openModal, 'close')
+    const confirmDialog = openModal.componentInstance as ConfirmDialogComponent
+    confirmDialog.confirmClicked.next(confirmDialog)
+    expect(closeSpy).toHaveBeenCalled()
+  })
+
   function initNormally() {
+    jest
+      .spyOn(activatedRoute, 'paramMap', 'get')
+      .mockReturnValue(of(convertToParamMap({ id: 3, section: 'details' })))
     jest
       .spyOn(documentService, 'get')
       .mockReturnValueOnce(of(Object.assign({}, doc)))

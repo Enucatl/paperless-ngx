@@ -9,13 +9,13 @@ import {
   fakeAsync,
   tick,
 } from '@angular/core/testing'
-import { NgbModule } from '@ng-bootstrap/ng-bootstrap'
+import { NgbModal, NgbModalModule, NgbModule } from '@ng-bootstrap/ng-bootstrap'
 import { BrowserModule } from '@angular/platform-browser'
 import { RouterTestingModule } from '@angular/router/testing'
 import { SettingsService } from 'src/app/services/settings.service'
 import { SavedViewService } from 'src/app/services/rest/saved-view.service'
 import { PermissionsService } from 'src/app/services/permissions.service'
-import { SETTINGS_KEYS } from 'src/app/data/paperless-uisettings'
+import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
 import { RemoteVersionService } from 'src/app/services/rest/remote-version.service'
 import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
 import { FormsModule, ReactiveFormsModule } from '@angular/forms'
@@ -31,7 +31,8 @@ import { FILTER_FULLTEXT_QUERY } from 'src/app/data/filter-rule-type'
 import { routes } from 'src/app/app-routing.module'
 import { PermissionsGuard } from 'src/app/guards/permissions.guard'
 import { CdkDragDrop, DragDropModule } from '@angular/cdk/drag-drop'
-import { PaperlessSavedView } from 'src/app/data/paperless-saved-view'
+import { SavedView } from 'src/app/data/saved-view'
+import { ProfileEditDialogComponent } from '../common/profile-edit-dialog/profile-edit-dialog.component'
 
 const saved_views = [
   {
@@ -86,6 +87,7 @@ describe('AppFrameComponent', () => {
   let documentListViewService: DocumentListViewService
   let router: Router
   let savedViewSpy
+  let modalService: NgbModal
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
@@ -98,6 +100,7 @@ describe('AppFrameComponent', () => {
         FormsModule,
         ReactiveFormsModule,
         DragDropModule,
+        NgbModalModule,
       ],
       providers: [
         SettingsService,
@@ -120,6 +123,7 @@ describe('AppFrameComponent', () => {
         ToastService,
         OpenDocumentsService,
         SearchService,
+        NgbModal,
         {
           provide: ActivatedRoute,
           useValue: {
@@ -148,6 +152,7 @@ describe('AppFrameComponent', () => {
     openDocumentsService = TestBed.inject(OpenDocumentsService)
     searchService = TestBed.inject(SearchService)
     documentListViewService = TestBed.inject(DocumentListViewService)
+    modalService = TestBed.inject(NgbModal)
     router = TestBed.inject(Router)
 
     jest
@@ -243,7 +248,7 @@ describe('AppFrameComponent', () => {
     expect(toastSpy).toHaveBeenCalled()
   })
 
-  it('should support collapsable menu', () => {
+  it('should support collapsible menu', () => {
     const button: HTMLButtonElement = (
       fixture.nativeElement as HTMLDivElement
     ).querySelector('button[data-toggle=collapse]')
@@ -293,6 +298,21 @@ describe('AppFrameComponent', () => {
     expect(autocompleteSpy).toHaveBeenCalled()
   }))
 
+  it('should handle autocomplete backend failure gracefully', fakeAsync(() => {
+    const serviceAutocompleteSpy = jest.spyOn(searchService, 'autocomplete')
+    serviceAutocompleteSpy.mockReturnValue(
+      throwError(() => new Error('autcomplete failed'))
+    )
+    // serviceAutocompleteSpy.mockReturnValue(of([' world']))
+    let result
+    component.searchAutoComplete(of('hello')).subscribe((res) => {
+      result = res
+    })
+    tick(250)
+    expect(serviceAutocompleteSpy).toHaveBeenCalled()
+    expect(result).toEqual([])
+  }))
+
   it('should support reset search field', () => {
     const resetSpy = jest.spyOn(component, 'resetSearchField')
     const input = (fixture.nativeElement as HTMLDivElement).querySelector(
@@ -336,7 +356,7 @@ describe('AppFrameComponent', () => {
     const toastSpy = jest.spyOn(toastService, 'showInfo')
     jest.spyOn(settingsService, 'storeSettings').mockReturnValue(of(true))
     component.onDrop({ previousIndex: 0, currentIndex: 1 } as CdkDragDrop<
-      PaperlessSavedView[]
+      SavedView[]
     >)
     expect(settingsSpy).toHaveBeenCalledWith([
       saved_views[2],
@@ -359,8 +379,16 @@ describe('AppFrameComponent', () => {
       .spyOn(settingsService, 'storeSettings')
       .mockReturnValue(throwError(() => new Error('unable to save')))
     component.onDrop({ previousIndex: 0, currentIndex: 2 } as CdkDragDrop<
-      PaperlessSavedView[]
+      SavedView[]
     >)
     expect(toastSpy).toHaveBeenCalled()
+  })
+
+  it('should support edit profile', () => {
+    const modalSpy = jest.spyOn(modalService, 'open')
+    component.editProfile()
+    expect(modalSpy).toHaveBeenCalledWith(ProfileEditDialogComponent, {
+      backdrop: 'static',
+    })
   })
 })

@@ -1,10 +1,13 @@
-<pngx-page-header title="Settings" i18n-title>
+<pngx-page-header
+  title="Settings"
+  i18n-title
+  info="Options to customize appearance, notifications, saved views and more. Settings apply to the <strong>current user only</strong>."
+  i18n-info
+  >
   <button class="btn btn-sm btn-outline-primary" (click)="tourService.start()"><ng-container i18n>Start tour</ng-container></button>
   <a *pngxIfPermissions="{ action: PermissionAction.View, type: PermissionType.Admin }" class="btn btn-sm btn-primary ms-3" href="admin/" target="_blank">
-      <ng-container i18n>Open Django Admin</ng-container>
-      <svg class="sidebaricon ms-1" fill="currentColor">
-        <use xlink:href="assets/bootstrap-icons.svg#arrow-up-right"/>
-      </svg>
+    <ng-container i18n>Open Django Admin</ng-container>
+    <i-bs name="arrow-up-right"></i-bs>
   </a>
 </pngx-page-header>
 
@@ -24,10 +27,16 @@
           <div class="col">
 
             <select class="form-select" formControlName="displayLanguage">
-              <option *ngFor="let lang of displayLanguageOptions" [ngValue]="lang.code">{{lang.name}}<span *ngIf="lang.code && currentLocale !== 'en-US'"> - {{lang.englishName}}</span></option>
+              @for (lang of displayLanguageOptions; track lang) {
+                <option [ngValue]="lang.code">{{lang.name}}@if (lang.code && currentLocale !== 'en-US') {
+                  <span> - {{lang.englishName}}</span>
+                }</option>
+              }
             </select>
 
-            <small *ngIf="displayLanguageIsDirty" class="form-text text-primary" i18n>You need to reload the page after applying a new language.</small>
+            @if (displayLanguageIsDirty) {
+              <small class="form-text text-primary" i18n>You need to reload the page after applying a new language.</small>
+            }
 
           </div>
         </div>
@@ -39,7 +48,11 @@
           <div class="col">
 
             <select class="form-select" formControlName="dateLocale">
-              <option *ngFor="let lang of dateLocaleOptions" [ngValue]="lang.code">{{lang.name}}<span *ngIf="lang.code"> - {{today | customDate:'shortDate':null:lang.code}}</span></option>
+              @for (lang of dateLocaleOptions; track lang) {
+                <option [ngValue]="lang.code">{{lang.name}}@if (lang.code) {
+                  <span> - {{today | customDate:'shortDate':null:lang.code}}</span>
+                }</option>
+              }
             </select>
 
           </div>
@@ -125,9 +138,7 @@
           </div>
           <div class="col-2">
             <button class="btn btn-link btn-sm pt-2 ps-0" [disabled]="!this.settingsForm.get('themeColor').value" (click)="clearThemeColor()">
-              <svg fill="currentColor" class="buttonicon-sm me-1">
-                <use xlink:href="assets/bootstrap-icons.svg#x"/>
-              </svg><ng-container i18n>Reset</ng-container>
+              <i-bs width="1em" height="1em" name="x"></i-bs><ng-container i18n>Reset</ng-container>
             </button>
           </div>
         </div>
@@ -137,12 +148,12 @@
         <div class="row mb-3">
           <div class="offset-md-3 col">
             <p i18n>
-              Update checking works by pinging the public <a href="https://api.github.com/repos/paperless-ngx/paperless-ngx/releases/latest" target="_blank" rel="noopener noreferrer">GitHub API</a> for the latest release to determine whether a new version is available.<br/>
-              Actual updating of the app must still be performed manually.
-            </p>
+            Update checking works by pinging the public <a href="https://api.github.com/repos/paperless-ngx/paperless-ngx/releases/latest" target="_blank" rel="noopener noreferrer">GitHub API</a> for the latest release to determine whether a new version is available.<br/>
+            Actual updating of the app must still be performed manually.
+          </p>
             <p i18n>
-              <em>No tracking data is collected by the app in any way.</em>
-            </p>
+            <em>No tracking data is collected by the app in any way.</em>
+          </p>
             <pngx-input-check i18n-title title="Enable update checking" formControlName="updateCheckingEnabled"></pngx-input-check>
           </div>
         </div>
@@ -176,8 +187,8 @@
         <div class="row mb-3">
           <div class="offset-md-3 col">
             <p i18n>
-              Settings apply to this user account for objects (Tags, Mail Rules, etc.) created via the web UI
-            </p>
+            Settings apply to this user account for objects (Tags, Mail Rules, etc.) created via the web UI
+          </p>
           </div>
         </div>
         <div class="row mb-3">
@@ -281,12 +292,12 @@
         <h4 i18n>Views</h4>
         <div formGroupName="savedViews">
 
-            <div *ngFor="let view of savedViews" [formGroupName]="view.id" class="row">
+          @for (view of savedViews; track view) {
+            <div [formGroupName]="view.id" class="row">
               <div class="mb-3 col">
                 <label class="form-label" for="name_{{view.id}}" i18n>Name</label>
                 <input type="text" class="form-control" formControlName="name" id="name_{{view.id}}">
               </div>
-
               <div class="mb-2 col">
                 <label class="form-label" for="show_on_dashboard_{{view.id}}" i18n>&nbsp;<span class="visually-hidden">Appears on</span></label>
                 <div class="form-check form-switch">
@@ -298,19 +309,23 @@
                   <label class="form-check-label" for="show_in_sidebar_{{view.id}}" i18n>Show in sidebar</label>
                 </div>
               </div>
-
               <div class="mb-2 col-auto">
                 <label class="form-label" for="name_{{view.id}}" i18n>Actions</label>
                 <button type="button" class="btn btn-sm btn-outline-danger form-control" (click)="deleteSavedView(view)" *pngxIfPermissions="{ action: PermissionAction.Delete, type: PermissionType.SavedView }" i18n>Delete</button>
               </div>
             </div>
+          }
 
-            <div *ngIf="savedViews && savedViews.length === 0" i18n>No saved views defined.</div>
+          @if (savedViews && savedViews.length === 0) {
+            <div i18n>No saved views defined.</div>
+          }
 
-            <div *ngIf="!savedViews">
+          @if (!savedViews) {
+            <div>
               <div class="spinner-border spinner-border-sm fw-normal ms-2 me-auto" role="status"></div>
               <div class="visually-hidden" i18n>Loading...</div>
             </div>
+          }
 
         </div>
 

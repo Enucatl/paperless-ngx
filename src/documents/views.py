@@ -34,6 +34,7 @@ from django.utils.decorators import method_decorator
 from django.utils.translation import get_language
 from django.views import View
 from django.views.decorators.cache import cache_control
+from django.views.decorators.http import condition
 from django.views.generic import TemplateView
 from django_filters.rest_framework import DjangoFilterBackend
 from langdetect import detect
@@ -62,10 +63,16 @@ from documents.bulk_download import ArchiveOnlyStrategy
 from documents.bulk_download import OriginalAndArchiveStrategy
 from documents.bulk_download import OriginalsOnlyStrategy
 from documents.classifier import load_classifier
+from documents.conditionals import metadata_etag
+from documents.conditionals import metadata_last_modified
+from documents.conditionals import preview_etag
+from documents.conditionals import suggestions_etag
+from documents.conditionals import suggestions_last_modified
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.data_models import DocumentSource
 from documents.filters import CorrespondentFilterSet
+from documents.filters import CustomFieldFilterSet
 from documents.filters import DocumentFilterSet
 from documents.filters import DocumentTypeFilterSet
 from documents.filters import ObjectOwnedOrGrantedPermissionsFilter
@@ -76,7 +83,6 @@ from documents.matching import match_correspondents
 from documents.matching import match_document_types
 from documents.matching import match_storage_paths
 from documents.matching import match_tags
-from documents.models import ConsumptionTemplate
 from documents.models import Correspondent
 from documents.models import CustomField
 from documents.models import Document
@@ -87,6 +93,9 @@ from documents.models import SavedView
 from documents.models import ShareLink
 from documents.models import StoragePath
 from documents.models import Tag
+from documents.models import Workflow
+from documents.models import WorkflowAction
+from documents.models import WorkflowTrigger
 from documents.parsers import get_parser_class_for_mime_type
 from documents.parsers import parse_date_generator
 from documents.permissions import PaperlessAdminPermissions
@@ -98,7 +107,6 @@ from documents.serialisers import AcknowledgeTasksViewSerializer
 from documents.serialisers import BulkDownloadSerializer
 from documents.serialisers import BulkEditObjectPermissionsSerializer
 from documents.serialisers import BulkEditSerializer
-from documents.serialisers import ConsumptionTemplateSerializer
 from documents.serialisers import CorrespondentSerializer
 from documents.serialisers import CustomFieldSerializer
 from documents.serialisers import DocumentListSerializer
@@ -112,8 +120,13 @@ from documents.serialisers import TagSerializer
 from documents.serialisers import TagSerializerVersion1
 from documents.serialisers import TasksViewSerializer
 from documents.serialisers import UiSettingsViewSerializer
+from documents.serialisers import WorkflowActionSerializer
+from documents.serialisers import WorkflowSerializer
+from documents.serialisers import WorkflowTriggerSerializer
+from documents.signals import document_updated
 from documents.tasks import consume_file
 from paperless import version
+from paperless.config import GeneralConfig
 from paperless.db import GnuPG
 from paperless.views import StandardPagination
 
@@ -182,10 +195,14 @@ class PassUserMixin(CreateModelMixin):
 class CorrespondentViewSet(ModelViewSet, PassUserMixin):
     model = Correspondent
 
-    queryset = Correspondent.objects.annotate(
-        document_count=Count("documents"),
-        last_correspondence=Max("documents__created"),
-    ).order_by(Lower("name"))
+    queryset = (
+        Correspondent.objects.annotate(
+            document_count=Count("documents"),
+            last_correspondence=Max("documents__created"),
+        )
+        .select_related("owner")
+        .order_by(Lower("name"))
+    )
 
     serializer_class = CorrespondentSerializer
     pagination_class = StandardPagination
@@ -208,8 +225,12 @@ class CorrespondentViewSet(ModelViewSet, PassUserMixin):
 class TagViewSet(ModelViewSet, PassUserMixin):
     model = Tag
 
-    queryset = Tag.objects.annotate(document_count=Count("documents")).order_by(
-        Lower("name"),
+    queryset = (
+        Tag.objects.annotate(document_count=Count("documents"))
+        .select_related("owner")
+        .order_by(
+            Lower("name"),
+        )
     )
 
     def get_serializer_class(self, *args, **kwargs):
@@ -232,9 +253,13 @@ class TagViewSet(ModelViewSet, PassUserMixin):
 class DocumentTypeViewSet(ModelViewSet, PassUserMixin):
     model = DocumentType
 
-    queryset = DocumentType.objects.annotate(
-        document_count=Count("documents"),
-    ).order_by(Lower("name"))
+    queryset = (
+        DocumentType.objects.annotate(
+            document_count=Count("documents"),
+        )
+        .select_related("owner")
+        .order_by(Lower("name"))
+    )
 
     serializer_class = DocumentTypeSerializer
     pagination_class = StandardPagination
@@ -283,7 +308,12 @@ class DocumentViewSet(
     )
 
     def get_queryset(self):
-        return Document.objects.distinct().annotate(num_notes=Count("notes"))
+        return (
+            Document.objects.distinct()
+            .annotate(num_notes=Count("notes"))
+            .select_related("correspondent", "storage_path", "document_type", "owner")
+            .prefetch_related("tags", "custom_fields", "notes")
+        )
 
     def get_serializer(self, *args, **kwargs):
         fields_param = self.request.query_params.get("fields", None)
@@ -303,6 +333,12 @@ class DocumentViewSet(
         from documents import index
 
         index.add_or_update_document(self.get_object())
+
+        document_updated.send(
+            sender=self.__class__,
+            document=self.get_object(),
+        )
+
         return response
 
     def destroy(self, request, *args, **kwargs):
@@ -356,6 +392,9 @@ class DocumentViewSet(
             return None
 
     @action(methods=["get"], detail=True)
+    @method_decorator(
+        condition(etag_func=metadata_etag, last_modified_func=metadata_last_modified),
+    )
     def metadata(self, request, pk=None):
         try:
             doc = Document.objects.get(pk=pk)
@@ -400,6 +439,12 @@ class DocumentViewSet(
         return Response(meta)
 
     @action(methods=["get"], detail=True)
+    @method_decorator(
+        condition(
+            etag_func=suggestions_etag,
+            last_modified_func=suggestions_last_modified,
+        ),
+    )
     def suggestions(self, request, pk=None):
         doc = get_object_or_404(Document, pk=pk)
         if request.user is not None and not has_perms_owner_aware(
@@ -437,6 +482,8 @@ class DocumentViewSet(
         )
 
     @action(methods=["get"], detail=True)
+    @method_decorator(cache_control(public=False, max_age=5 * 60))
+    @method_decorator(condition(etag_func=preview_etag))
     def preview(self, request, pk=None):
         try:
             response = self.file_response(pk, request, "inline")
@@ -627,9 +674,18 @@ class DocumentViewSet(
 
 class SearchResultSerializer(DocumentSerializer, PassUserMixin):
     def to_representation(self, instance):
-        doc = Document.objects.get(id=instance["id"])
+        doc = (
+            Document.objects.select_related(
+                "correspondent",
+                "storage_path",
+                "document_type",
+                "owner",
+            )
+            .prefetch_related("tags", "custom_fields", "notes")
+            .get(id=instance["id"])
+        )
         notes = ",".join(
-            [str(c.note) for c in Note.objects.filter(document=instance["id"])],
+            [str(c.note) for c in doc.notes.all()],
         )
         r = super().to_representation(doc)
         r["__search_hit__"] = {
@@ -701,16 +757,12 @@ class UnifiedSearchViewSet(DocumentViewSet):
 
     @action(detail=False, methods=["GET"], name="Get Next ASN")
     def next_asn(self, request, *args, **kwargs):
-        return Response(
-            (
-                Document.objects.filter(archive_serial_number__gte=0)
-                .order_by("archive_serial_number")
-                .last()
-                .archive_serial_number
-                or 0
-            )
-            + 1,
+        max_asn = Document.objects.aggregate(
+            Max("archive_serial_number", default=0),
+        ).get(
+            "archive_serial_number__max",
         )
+        return Response(max_asn + 1)
 
 
 class LogViewSet(ViewSet):
@@ -752,7 +804,11 @@ class SavedViewViewSet(ModelViewSet, PassUserMixin):
 
     def get_queryset(self):
         user = self.request.user
-        return SavedView.objects.filter(owner=user)
+        return (
+            SavedView.objects.filter(owner=user)
+            .select_related("owner")
+            .prefetch_related("filter_rules")
+        )
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -809,6 +865,7 @@ class PostDocumentView(GenericAPIView):
         doc_name, doc_data = serializer.validated_data.get("document")
         correspondent_id = serializer.validated_data.get("correspondent")
         document_type_id = serializer.validated_data.get("document_type")
+        storage_path_id = serializer.validated_data.get("storage_path")
         tag_ids = serializer.validated_data.get("tags")
         title = serializer.validated_data.get("title")
         created = serializer.validated_data.get("created")
@@ -835,6 +892,7 @@ class PostDocumentView(GenericAPIView):
             title=title,
             correspondent_id=correspondent_id,
             document_type_id=document_type_id,
+            storage_path_id=storage_path_id,
             tag_ids=tag_ids,
             created=created,
             asn=archive_serial_number,
@@ -1080,8 +1138,12 @@ class BulkDownloadView(GenericAPIView):
 class StoragePathViewSet(ModelViewSet, PassUserMixin):
     model = StoragePath
 
-    queryset = StoragePath.objects.annotate(document_count=Count("documents")).order_by(
-        Lower("name"),
+    queryset = (
+        StoragePath.objects.annotate(document_count=Count("documents"))
+        .select_related("owner")
+        .order_by(
+            Lower("name"),
+        )
     )
 
     serializer_class = StoragePathSerializer
@@ -1116,6 +1178,16 @@ class UiSettingsView(GenericAPIView):
             ui_settings["update_checking"] = {
                 "backend_setting": settings.ENABLE_UPDATE_CHECK,
             }
+
+        general_config = GeneralConfig()
+
+        ui_settings["app_title"] = settings.APP_TITLE
+        if general_config.app_title is not None and len(general_config.app_title) > 0:
+            ui_settings["app_title"] = general_config.app_title
+        ui_settings["app_logo"] = settings.APP_LOGO
+        if general_config.app_logo is not None and len(general_config.app_logo) > 0:
+            ui_settings["app_logo"] = general_config.app_logo
+
         user_resp = {
             "id": user.id,
             "username": user.username,
@@ -1158,8 +1230,8 @@ class RemoteVersionView(GenericAPIView):
         current_version = packaging_version.parse(version.__full_version_str__)
         try:
             req = urllib.request.Request(
-                "https://api.github.com/repos/paperlessngx/"
-                "paperlessngx/releases/latest",
+                "https://api.github.com/repos/paperless-ngx/"
+                "paperless-ngx/releases/latest",
             )
             # Ensure a JSON response
             req.add_header("Accept", "application/json")
@@ -1339,15 +1411,51 @@ class BulkEditObjectPermissionsView(GenericAPIView, PassUserMixin):
             )
 
 
-class ConsumptionTemplateViewSet(ModelViewSet):
+class WorkflowTriggerViewSet(ModelViewSet):
     permission_classes = (IsAuthenticated, PaperlessObjectPermissions)
 
-    serializer_class = ConsumptionTemplateSerializer
+    serializer_class = WorkflowTriggerSerializer
     pagination_class = StandardPagination
 
-    model = ConsumptionTemplate
+    model = WorkflowTrigger
 
-    queryset = ConsumptionTemplate.objects.all().order_by("name")
+    queryset = WorkflowTrigger.objects.all()
+
+
+class WorkflowActionViewSet(ModelViewSet):
+    permission_classes = (IsAuthenticated, PaperlessObjectPermissions)
+
+    serializer_class = WorkflowActionSerializer
+    pagination_class = StandardPagination
+
+    model = WorkflowAction
+
+    queryset = WorkflowAction.objects.all().prefetch_related(
+        "assign_tags",
+        "assign_view_users",
+        "assign_view_groups",
+        "assign_change_users",
+        "assign_change_groups",
+        "assign_custom_fields",
+    )
+
+
+class WorkflowViewSet(ModelViewSet):
+    permission_classes = (IsAuthenticated, PaperlessObjectPermissions)
+
+    serializer_class = WorkflowSerializer
+    pagination_class = StandardPagination
+
+    model = Workflow
+
+    queryset = (
+        Workflow.objects.all()
+        .order_by("order")
+        .prefetch_related(
+            "triggers",
+            "actions",
+        )
+    )
 
 
 class CustomFieldViewSet(ModelViewSet):
@@ -1355,6 +1463,11 @@ class CustomFieldViewSet(ModelViewSet):
 
     serializer_class = CustomFieldSerializer
     pagination_class = StandardPagination
+    filter_backends = (
+        DjangoFilterBackend,
+        OrderingFilter,
+    )
+    filterset_class = CustomFieldFilterSet
 
     model = CustomField
 

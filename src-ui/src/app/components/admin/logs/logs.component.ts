@@ -2,9 +2,9 @@ import {
   Component,
   ElementRef,
   OnInit,
-  AfterViewChecked,
   ViewChild,
   OnDestroy,
+  ChangeDetectorRef,
 } from '@angular/core'
 import { Subject, takeUntil } from 'rxjs'
 import { LogService } from 'src/app/services/rest/log.service'
@@ -14,8 +14,11 @@ import { LogService } from 'src/app/services/rest/log.service'
   templateUrl: './logs.component.html',
   styleUrls: ['./logs.component.scss'],
 })
-export class LogsComponent implements OnInit, AfterViewChecked, OnDestroy {
-  constructor(private logService: LogService) {}
+export class LogsComponent implements OnInit, OnDestroy {
+  constructor(
+    private logService: LogService,
+    private changedetectorRef: ChangeDetectorRef
+  ) {}
 
   public logs: string[] = []
 
@@ -26,6 +29,8 @@ export class LogsComponent implements OnInit, AfterViewChecked, OnDestroy {
   private unsubscribeNotifier: Subject<any> = new Subject()
 
   public isLoading: boolean = false
+
+  public autoRefreshInterval: any
 
   @ViewChild('logContainer') logContainer: ElementRef
 
@@ -41,16 +46,14 @@ export class LogsComponent implements OnInit, AfterViewChecked, OnDestroy {
           this.activeLog = this.logFiles[0]
           this.reloadLogs()
         }
+        this.toggleAutoRefresh()
       })
-  }
-
-  ngAfterViewChecked() {
-    this.scrollToBottom()
   }
 
   ngOnDestroy(): void {
     this.unsubscribeNotifier.next(true)
     this.unsubscribeNotifier.complete()
+    clearInterval(this.autoRefreshInterval)
   }
 
   reloadLogs() {
@@ -62,6 +65,7 @@ export class LogsComponent implements OnInit, AfterViewChecked, OnDestroy {
         next: (result) => {
           this.logs = result
           this.isLoading = false
+          this.scrollToBottom()
         },
         error: () => {
           this.logs = []
@@ -85,10 +89,22 @@ export class LogsComponent implements OnInit, AfterViewChecked, OnDestroy {
   }
 
   scrollToBottom(): void {
+    this.changedetectorRef.detectChanges()
     this.logContainer?.nativeElement.scroll({
       top: this.logContainer.nativeElement.scrollHeight,
       left: 0,
       behavior: 'auto',
     })
+  }
+
+  toggleAutoRefresh(): void {
+    if (this.autoRefreshInterval) {
+      clearInterval(this.autoRefreshInterval)
+      this.autoRefreshInterval = null
+    } else {
+      this.autoRefreshInterval = setInterval(() => {
+        this.reloadLogs()
+      }, 5000)
+    }
   }
 }

@@ -215,6 +215,8 @@ class MailDocumentParser(DocumentParser):
                 mail_message.attachments,
             )
 
+            self.log.debug("Merging email text and HTML content into single PDF")
+
             with GotenbergClient(
                 host=settings.TIKA_GOTENBERG_ENDPOINT,
                 timeout=settings.CELERY_TASK_TIME_LIMIT,
@@ -348,7 +350,7 @@ class MailDocumentParser(DocumentParser):
             text = compiled_close.sub("</div", text)
             return text
 
-        self.log.info("Converting html to PDF")
+        self.log.info("Converting message html to PDF")
 
         tempdir = Path(self.tempdir)
 
@@ -403,3 +405,9 @@ class MailDocumentParser(DocumentParser):
         html_pdf = tempdir / "html.pdf"
         html_pdf.write_bytes(response.content)
         return html_pdf
+
+    def get_settings(self):
+        """
+        This parser does not implement additional settings yet
+        """
+        return None

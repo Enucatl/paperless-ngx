@@ -136,6 +136,11 @@ script can access the following relevant environment variables set:
     be triggered, leading to failures as two tasks work on the
     same document path
 
+!!! warning
+
+    If your script modifies `DOCUMENT_WORKING_PATH` in a non-deterministic
+    way, this may allow duplicate documents to be stored
+
 A simple but common example for this would be creating a simple script
 like this:
 
@@ -510,7 +515,7 @@ existing tables) with:
 
 ## Barcodes {#barcodes}
 
-Paperless is able to utilize barcodes for automatically preforming some tasks.
+Paperless is able to utilize barcodes for automatically performing some tasks.
 
 At this time, the library utilized for detection of barcodes supports the following types:
 
@@ -566,7 +571,7 @@ collating two separate scans into one document, reordering the pages as necessar
 
 Suppose you have a double-sided document with 6 pages (3 sheets of paper). First,
 put the stack into your ADF as normal, ensuring that page 1 is scanned first. Your ADF
-will now scan pages 1, 3, and 5. Then you (or your the scanner, if it supports it) upload
+will now scan pages 1, 3, and 5. Then you (or your scanner, if it supports it) upload
 the scan into the correct sub-directory of the consume folder (`double-sided` by default;
 keep in mind that Paperless will _not_ automatically create the directory for you.)
 Paperless will then process the scan and move it into an internal staging area.
@@ -608,7 +613,7 @@ scan a completely new "odd numbered pages" one. The old staging file will get di
 
 The collation feature can be used together with the [subdirs as tags](configuration.md#consume_config)
 feature (but this is not a requirement). Just create a correctly named double-sided subdir
-in the hierachy and upload your scans there. For example, both `double-sided/foo/bar` as
+in the hierarchy and upload your scans there. For example, both `double-sided/foo/bar` as
 well as `foo/bar/double-sided` will cause the collated document to be treated as if it
 were uploaded into `foo/bar` and receive both `foo` and `bar` tags, but not `double-sided`.
 

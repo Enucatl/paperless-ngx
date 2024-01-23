@@ -8,19 +8,22 @@ most of the available filters and ordering fields.
 
 The API provides the following main endpoints:
 
+- `/api/correspondents/`: Full CRUD support.
+- `/api/custom_fields/`: Full CRUD support.
 - `/api/documents/`: Full CRUD support, except POSTing new documents.
   See below.
-- `/api/correspondents/`: Full CRUD support.
 - `/api/document_types/`: Full CRUD support.
+- `/api/groups/`: Full CRUD support.
 - `/api/logs/`: Read-Only.
-- `/api/tags/`: Full CRUD support.
-- `/api/tasks/`: Read-only.
 - `/api/mail_accounts/`: Full CRUD support.
 - `/api/mail_rules/`: Full CRUD support.
-- `/api/users/`: Full CRUD support.
-- `/api/groups/`: Full CRUD support.
+- `/api/profile/`: GET, PATCH
 - `/api/share_links/`: Full CRUD support.
-- `/api/custom_fields/`: Full CRUD support.
+- `/api/storage_paths/`: Full CRUD support.
+- `/api/tags/`: Full CRUD support.
+- `/api/tasks/`: Read-only.
+- `/api/users/`: Full CRUD support.
+- `/api/workflows/`: Full CRUD support.
 
 All of these endpoints except for the logging endpoint allow you to
 fetch (and edit and delete where appropriate) individual objects by
@@ -53,7 +56,7 @@ fields:
 - `set_permissions`: Allows setting document permissions. Optional,
   write-only. See [below](#permissions).
 - `custom_fields`: Array of custom fields & values, specified as
-  { field: CUSTOM_FIELD_ID, value: VALUE }
+  `{ field: CUSTOM_FIELD_ID, value: VALUE }`
 
 ## Downloading documents
 
@@ -136,7 +139,7 @@ document. Paperless only reports PDF metadata at this point.
 
 ## Authorization
 
-The REST api provides three different forms of authentication.
+The REST api provides four different forms of authentication.
 
 1.  Basic authentication
 
@@ -157,6 +160,10 @@ The REST api provides three different forms of authentication.
 
 3.  Token authentication
 
+    You can create (or re-create) an API token by opening the "My Profile"
+    link in the user dropdown found in the web UI and clicking the circular
+    arrow button.
+
     Paperless also offers an endpoint to acquire authentication tokens.
 
     POST a username and password as a form or json string to
@@ -168,7 +175,13 @@ The REST api provides three different forms of authentication.
     Authorization: Token <token>
     ```
 
-    Tokens can be managed and revoked in the paperless admin.
+    Tokens can also be managed in the Django admin.
+
+4.  Remote User authentication
+
+    If already setup (see
+    [configuration](configuration.md#PAPERLESS_ENABLE_HTTP_REMOTE_USER)),
+    you can authenticate against the API using Remote User auth.
 
 ## Searching for documents
 
@@ -267,6 +280,7 @@ The endpoint supports the following optional form fields:
 - `correspondent`: Specify the ID of a correspondent that the consumer
   should use for the document.
 - `document_type`: Similar to correspondent.
+- `storage_path`: Similar to correspondent.
 - `tags`: Similar to correspondent. Specify this multiple times to
   have multiple tags added to the document.
 - `archive_serial_number`: An optional archive serial number to set.
