@@ -289,7 +289,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/dashboard/widgets/upload-file-widget/upload-file-widget.component.html</context>
-          <context context-type="linenumber">63</context>
+          <context context-type="linenumber">73</context>
         </context-group>
         <target state="translated">Belgeyi aç</target>
       </trans-unit>
@@ -507,7 +507,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">323</context>
+          <context context-type="linenumber">315</context>
         </context-group>
         <target state="translated">Gözardı et</target>
       </trans-unit>
@@ -567,7 +567,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">315</context>
+          <context context-type="linenumber">307</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/save-view-config-dialog/save-view-config-dialog.component.html</context>
@@ -589,7 +589,7 @@
           <context context-type="sourcefile">src/app/components/admin/config/config.component.ts</context>
           <context context-type="linenumber">107</context>
         </context-group>
-        <target state="needs-translation">Invalid JSON</target>
+        <target state="translated">Geçersiz JSON</target>
       </trans-unit>
       <trans-unit id="5103146006962696736" datatype="html">
         <source>Configuration updated</source>
@@ -621,7 +621,7 @@
           <context context-type="sourcefile">src/app/components/admin/config/config.component.ts</context>
           <context context-type="linenumber">183</context>
         </context-group>
-        <target state="needs-translation">An error occurred uploading file</target>
+        <target state="translated">Dosya yüklenirken bir hata oluştu</target>
       </trans-unit>
       <trans-unit id="4804785061014590286" datatype="html">
         <source>Logs</source>
@@ -657,7 +657,7 @@
           <context context-type="sourcefile">src/app/components/admin/tasks/tasks.component.html</context>
           <context context-type="linenumber">16</context>
         </context-group>
-        <target state="needs-translation">Auto refresh</target>
+        <target state="translated">Otomatik yenileme</target>
       </trans-unit>
       <trans-unit id="3894950702316166331" datatype="html">
         <source>Loading...</source>
@@ -703,7 +703,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">332</context>
+          <context context-type="linenumber">324</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/document-list.component.html</context>
@@ -1055,7 +1055,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">281</context>
+          <context context-type="linenumber">283</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.html</context>
@@ -1913,7 +1913,7 @@
           <context context-type="sourcefile">src/app/components/admin/tasks/tasks.component.ts</context>
           <context context-type="linenumber">137</context>
         </context-group>
-        <target state="needs-translation">completed</target>
+        <target state="translated">tamamlandı</target>
       </trans-unit>
       <trans-unit id="4083337005045748464" datatype="html">
         <source>failed</source>
@@ -1965,7 +1965,7 @@
           <context context-type="sourcefile">src/app/components/admin/users-groups/users-groups.component.html</context>
           <context context-type="linenumber">14</context>
         </context-group>
-        <target state="needs-translation">Add User</target>
+        <target state="translated">Kullanıcı Ekle</target>
       </trans-unit>
       <trans-unit id="5248717555542428023" datatype="html">
         <source>Username</source>
@@ -2081,7 +2081,7 @@
           <context context-type="sourcefile">src/app/components/admin/users-groups/users-groups.component.html</context>
           <context context-type="linenumber">52</context>
         </context-group>
-        <target state="needs-translation">Add Group</target>
+        <target state="translated">Grup Ekle</target>
       </trans-unit>
       <trans-unit id="4746158651610481283" datatype="html">
         <source>No groups defined</source>
@@ -2133,7 +2133,7 @@
           <context context-type="sourcefile">src/app/components/admin/users-groups/users-groups.component.ts</context>
           <context context-type="linenumber">115</context>
         </context-group>
-        <target state="needs-translation">This operation will permanently delete this user account.</target>
+        <target state="translated">Bu eylem kullanıcıyı kalıcı olarak silecek.</target>
       </trans-unit>
       <trans-unit id="5641451190833696892" datatype="html">
         <source>This operation cannot be undone.</source>
@@ -2147,7 +2147,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">719</context>
+          <context context-type="linenumber">733</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.ts</context>
@@ -2187,7 +2187,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">721</context>
+          <context context-type="linenumber">735</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.ts</context>
@@ -2305,7 +2305,7 @@
           <context context-type="sourcefile">src/app/components/app-frame/app-frame.component.html</context>
           <context context-type="linenumber">55</context>
         </context-group>
-        <target state="needs-translation">My Profile</target>
+        <target state="translated">Profilim</target>
       </trans-unit>
       <trans-unit id="3797778920049399855" datatype="html">
         <source>Logout</source>
@@ -3645,7 +3645,7 @@
           <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.html</context>
           <context context-type="linenumber">28</context>
         </context-group>
-        <target state="needs-translation">First name</target>
+        <target state="translated">İsim</target>
       </trans-unit>
       <trans-unit id="3586674587150281199" datatype="html">
         <source>Last name</source>
@@ -3657,7 +3657,7 @@
           <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.html</context>
           <context context-type="linenumber">29</context>
         </context-group>
-        <target state="needs-translation">Last name</target>
+        <target state="translated">Soyisim</target>
       </trans-unit>
       <trans-unit id="8204176479746810612" datatype="html">
         <source>Active</source>
@@ -3765,7 +3765,7 @@
           <context context-type="sourcefile">src/app/components/common/edit-dialog/workflow-edit-dialog/workflow-edit-dialog.component.html</context>
           <context context-type="linenumber">68</context>
         </context-group>
-        <target state="needs-translation">Add Action</target>
+        <target state="translated">Eylem Ekle</target>
       </trans-unit>
       <trans-unit id="6417103744331194518" datatype="html">
         <source>Action type</source>
@@ -4138,7 +4138,7 @@
           <context context-type="sourcefile">src/app/components/common/input/url/url.component.html</context>
           <context context-type="linenumber">7</context>
         </context-group>
-        <target state="needs-translation">Remove</target>
+        <target state="translated">Kaldır</target>
       </trans-unit>
       <trans-unit id="445302259125375799" datatype="html">
         <source>Invalid date.</source>
@@ -4190,7 +4190,7 @@
           <context context-type="sourcefile">src/app/components/common/input/file/file.component.html</context>
           <context context-type="linenumber">15</context>
         </context-group>
-        <target state="needs-translation">Upload</target>
+        <target state="translated">Yükle</target>
       </trans-unit>
       <trans-unit id="5554528553553249088" datatype="html">
         <source>Show password</source>
@@ -4307,7 +4307,7 @@
           <context context-type="sourcefile">src/app/components/common/page-header/page-header.component.html</context>
           <context context-type="linenumber">9</context>
         </context-group>
-        <target state="needs-translation">What's this?</target>
+        <target state="translated">Bu nedir?</target>
       </trans-unit>
       <trans-unit id="2827984212740060090" datatype="html">
         <source>Read more</source>
@@ -4315,7 +4315,7 @@
           <context context-type="sourcefile">src/app/components/common/page-header/page-header.component.html</context>
           <context context-type="linenumber">15</context>
         </context-group>
-        <target state="needs-translation">Read more</target>
+        <target state="translated">Daha fazla oku</target>
       </trans-unit>
       <trans-unit id="7062872617520618723" datatype="html">
         <source>Set permissions</source>
@@ -4323,7 +4323,7 @@
           <context context-type="sourcefile">src/app/components/common/permissions-dialog/permissions-dialog.component.ts</context>
           <context context-type="linenumber">28</context>
         </context-group>
-        <target state="needs-translation">Set permissions</target>
+        <target state="translated">İzinleri ayarla</target>
       </trans-unit>
       <trans-unit id="1678966148862835666" datatype="html">
         <source>Edit permissions for </source>
@@ -4347,7 +4347,7 @@
           <context context-type="sourcefile">src/app/components/common/permissions-filter-dropdown/permissions-filter-dropdown.component.html</context>
           <context context-type="linenumber">26</context>
         </context-group>
-        <target state="needs-translation">My documents</target>
+        <target state="translated">Belgelerim</target>
       </trans-unit>
       <trans-unit id="231920238966427751" datatype="html">
         <source>Shared with me</source>
@@ -4355,7 +4355,7 @@
           <context context-type="sourcefile">src/app/components/common/permissions-filter-dropdown/permissions-filter-dropdown.component.html</context>
           <context context-type="linenumber">36</context>
         </context-group>
-        <target state="needs-translation">Shared with me</target>
+        <target state="translated">Benimle paylaşılan</target>
       </trans-unit>
       <trans-unit id="175385209536581523" datatype="html">
         <source>Shared by me</source>
@@ -4363,7 +4363,7 @@
           <context context-type="sourcefile">src/app/components/common/permissions-filter-dropdown/permissions-filter-dropdown.component.html</context>
           <context context-type="linenumber">46</context>
         </context-group>
-        <target state="needs-translation">Shared by me</target>
+        <target state="translated">Benim paylaştıklarım</target>
       </trans-unit>
       <trans-unit id="5151074932731293042" datatype="html">
         <source>Unowned</source>
@@ -4371,7 +4371,7 @@
           <context context-type="sourcefile">src/app/components/common/permissions-filter-dropdown/permissions-filter-dropdown.component.html</context>
           <context context-type="linenumber">56</context>
         </context-group>
-        <target state="needs-translation">Unowned</target>
+        <target state="translated">Sahipsiz</target>
       </trans-unit>
       <trans-unit id="8999708063434507268" datatype="html">
         <source>Hide unowned</source>
@@ -4459,7 +4459,7 @@
           <context context-type="sourcefile">src/app/components/common/share-links-dropdown/share-links-dropdown.component.html</context>
           <context context-type="linenumber">29</context>
         </context-group>
-        <target state="needs-translation">Copy</target>
+        <target state="translated">Kopyala</target>
       </trans-unit>
       <trans-unit id="595732867213154214" datatype="html">
         <source>Regenerate auth token</source>
@@ -4479,7 +4479,7 @@
           <context context-type="sourcefile">src/app/components/common/share-links-dropdown/share-links-dropdown.component.html</context>
           <context context-type="linenumber">40</context>
         </context-group>
-        <target state="needs-translation">Copied!</target>
+        <target state="translated">Kopyalandı!</target>
       </trans-unit>
       <trans-unit id="4369881772624105142" datatype="html">
         <source>Warning: changing the token cannot be undone</source>
@@ -4495,7 +4495,7 @@
           <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.ts</context>
           <context context-type="linenumber">94</context>
         </context-group>
-        <target state="needs-translation">Emails must match</target>
+        <target state="translated">Emailler eşleşmeli</target>
       </trans-unit>
       <trans-unit id="5281933990298241826" datatype="html">
         <source>Passwords must match</source>
@@ -4503,7 +4503,7 @@
           <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.ts</context>
           <context context-type="linenumber">122</context>
         </context-group>
-        <target state="needs-translation">Passwords must match</target>
+        <target state="translated">Şifreler eşleşmeli</target>
       </trans-unit>
       <trans-unit id="4219429959475101385" datatype="html">
         <source>Profile updated successfully</source>
@@ -4511,7 +4511,7 @@
           <context context-type="sourcefile">src/app/components/common/profile-edit-dialog/profile-edit-dialog.component.ts</context>
           <context context-type="linenumber">142</context>
         </context-group>
-        <target state="needs-translation">Profile updated successfully</target>
+        <target state="translated">Profil başarıyla güncellendi</target>
       </trans-unit>
       <trans-unit id="3417726855410304962" datatype="html">
         <source>Error saving profile</source>
@@ -4749,7 +4749,7 @@
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/dashboard/widgets/upload-file-widget/upload-file-widget.component.html</context>
-          <context context-type="linenumber">34</context>
+          <context context-type="linenumber">39</context>
         </context-group>
         <target state="translated">Tümünü göster</target>
       </trans-unit>
@@ -4929,7 +4929,7 @@
         <source>Dismiss completed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/dashboard/widgets/upload-file-widget/upload-file-widget.component.html</context>
-          <context context-type="linenumber">16</context>
+          <context context-type="linenumber">20</context>
         </context-group>
         <note priority="1" from="description">This button dismisses all status messages about processed documents on the dashboard (failed and successful)</note>
         <target state="translated">Bitmiş olanları gizle</target>
@@ -4938,7 +4938,7 @@
         <source>{VAR_PLURAL, plural, =1 {One more document} other {<x id="INTERPOLATION"/> more documents}}</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/dashboard/widgets/upload-file-widget/upload-file-widget.component.html</context>
-          <context context-type="linenumber">32</context>
+          <context context-type="linenumber">37</context>
         </context-group>
         <note priority="1" from="description">This is shown as a summary line when there are more than 5 document in the processing pipeline.</note>
         <target state="translated">{VAR_PLURAL, plural, =1 {Bir belge daha} other {<x id="INTERPOLATION"/> daha fazla belgel}}</target>
@@ -5312,27 +5312,15 @@
         <source>Notes <x id="START_BLOCK_IF" equiv-text="@if (document?.notes.length) {"/><x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;badge text-bg-secondary ms-1&quot;&gt;"/><x id="INTERPOLATION" equiv-text="ngth}}"/><x id="CLOSE_TAG_SPAN" ctype="x-span"/><x id="CLOSE_BLOCK_IF" equiv-text="}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">270,273</context>
+          <context context-type="linenumber">272,275</context>
         </context-group>
         <target state="needs-translation">Notes <x id="START_BLOCK_IF" equiv-text="@if (document?.notes.length) {"/><x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;badge text-bg-secondary ms-1&quot;&gt;"/><x id="INTERPOLATION" equiv-text="ngth}}"/><x id="CLOSE_TAG_SPAN" ctype="x-span"/><x id="CLOSE_BLOCK_IF" equiv-text="}"/></target>
-      </trans-unit>
-      <trans-unit id="8191371354890763172" datatype="html">
-        <source>Enter Password</source>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">304</context>
-        </context-group>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">361</context>
-        </context-group>
-        <target state="translated">Parolayı girin</target>
       </trans-unit>
       <trans-unit id="5129524307369213584" datatype="html">
         <source>Save &amp; next</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">317</context>
+          <context context-type="linenumber">309</context>
         </context-group>
         <target state="translated">Kaydet &amp; sonraki</target>
       </trans-unit>
@@ -5340,15 +5328,23 @@
         <source>Save &amp; close</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
-          <context context-type="linenumber">320</context>
+          <context context-type="linenumber">312</context>
         </context-group>
         <target state="needs-translation">Save &amp; close</target>
+      </trans-unit>
+      <trans-unit id="8191371354890763172" datatype="html">
+        <source>Enter Password</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.html</context>
+          <context context-type="linenumber">363</context>
+        </context-group>
+        <target state="translated">Parolayı girin</target>
       </trans-unit>
       <trans-unit id="2218903673684131427" datatype="html">
         <source>An error occurred loading content: <x id="PH" equiv-text="err.message ?? err.toString()"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">284,286</context>
+          <context context-type="linenumber">298,300</context>
         </context-group>
         <target state="needs-translation">An error occurred loading content: <x id="PH" equiv-text="err.message ?? err.toString()"/></target>
       </trans-unit>
@@ -5356,7 +5352,7 @@
         <source>Document changes detected</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">307</context>
+          <context context-type="linenumber">321</context>
         </context-group>
         <target state="needs-translation">Document changes detected</target>
       </trans-unit>
@@ -5364,7 +5360,7 @@
         <source>The version of this document in your browser session appears older than the existing version.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">308</context>
+          <context context-type="linenumber">322</context>
         </context-group>
         <target state="needs-translation">The version of this document in your browser session appears older than the existing version.</target>
       </trans-unit>
@@ -5372,7 +5368,7 @@
         <source>Saving the document here may overwrite other changes that were made. To restore the existing version, discard your changes or close the document.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">309</context>
+          <context context-type="linenumber">323</context>
         </context-group>
         <target state="needs-translation">Saving the document here may overwrite other changes that were made. To restore the existing version, discard your changes or close the document.</target>
       </trans-unit>
@@ -5380,7 +5376,7 @@
         <source>Ok</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">311</context>
+          <context context-type="linenumber">325</context>
         </context-group>
         <target state="needs-translation">Ok</target>
       </trans-unit>
@@ -5388,7 +5384,7 @@
         <source>Error retrieving metadata</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">451</context>
+          <context context-type="linenumber">465</context>
         </context-group>
         <target state="translated">Metaveri alınırken hata oluştu</target>
       </trans-unit>
@@ -5396,7 +5392,7 @@
         <source>Error retrieving suggestions.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">476</context>
+          <context context-type="linenumber">490</context>
         </context-group>
         <target state="translated">Önerileri getirirken hata oluştu.</target>
       </trans-unit>
@@ -5404,11 +5400,11 @@
         <source>Document saved successfully.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">594</context>
+          <context context-type="linenumber">608</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">603</context>
+          <context context-type="linenumber">617</context>
         </context-group>
         <target state="needs-translation">Document saved successfully.</target>
       </trans-unit>
@@ -5416,11 +5412,11 @@
         <source>Error saving document</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">607</context>
+          <context context-type="linenumber">621</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">648</context>
+          <context context-type="linenumber">662</context>
         </context-group>
         <target state="needs-translation">Error saving document</target>
       </trans-unit>
@@ -5428,7 +5424,7 @@
         <source>Confirm delete</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">674</context>
+          <context context-type="linenumber">688</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/manage/management-list/management-list.component.ts</context>
@@ -5440,7 +5436,7 @@
         <source>Do you really want to delete document &quot;<x id="PH" equiv-text="this.document.title"/>&quot;?</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">675</context>
+          <context context-type="linenumber">689</context>
         </context-group>
         <target state="translated">"<x id="PH" equiv-text="this.document.title"/>" olan belgeyi gerçekten silmek istiyormusunuz?</target>
       </trans-unit>
@@ -5448,7 +5444,7 @@
         <source>The files for this document will be deleted permanently. This operation cannot be undone.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">676</context>
+          <context context-type="linenumber">690</context>
         </context-group>
         <target state="translated">Bu belgeye ait dosyalar kalıcı olarak siliniecektir. Bu işlem geri alınamaz.</target>
       </trans-unit>
@@ -5456,7 +5452,7 @@
         <source>Delete document</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">678</context>
+          <context context-type="linenumber">692</context>
         </context-group>
         <target state="translated">Belgeyi sil</target>
       </trans-unit>
@@ -5464,7 +5460,7 @@
         <source>Error deleting document</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">697</context>
+          <context context-type="linenumber">711</context>
         </context-group>
         <target state="needs-translation">Error deleting document</target>
       </trans-unit>
@@ -5472,7 +5468,7 @@
         <source>Redo OCR confirm</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">717</context>
+          <context context-type="linenumber">731</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-list/bulk-editor/bulk-editor.component.ts</context>
@@ -5484,7 +5480,7 @@
         <source>This operation will permanently redo OCR for this document.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">718</context>
+          <context context-type="linenumber">732</context>
         </context-group>
         <target state="needs-translation">This operation will permanently redo OCR for this document.</target>
       </trans-unit>
@@ -5492,7 +5488,7 @@
         <source>Redo OCR operation will begin in the background. Close and re-open or reload this document after the operation has completed to see new content.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">729</context>
+          <context context-type="linenumber">743</context>
         </context-group>
         <target state="needs-translation">Redo OCR operation will begin in the background. Close and re-open or reload this document after the operation has completed to see new content.</target>
       </trans-unit>
@@ -5500,7 +5496,7 @@
         <source>Error executing operation</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">740</context>
+          <context context-type="linenumber">754</context>
         </context-group>
         <target state="needs-translation">Error executing operation</target>
       </trans-unit>
@@ -5508,7 +5504,7 @@
         <source>Page Fit</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/components/document-detail/document-detail.component.ts</context>
-          <context context-type="linenumber">809</context>
+          <context context-type="linenumber">823</context>
         </context-group>
         <target state="needs-translation">Page Fit</target>
       </trans-unit>
