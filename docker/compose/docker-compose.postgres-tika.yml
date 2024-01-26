@@ -88,7 +88,7 @@ services:
       - PAPERLESS_URL=https://paperless.nuc10i7fnh.home.arpa
       - PAPERLESS_ENABLE_HTTP_REMOTE_USER=true
       - PAPERLESS_LOGOUT_REDIRECT_URL=https://authelia.nuc10i7fnh.home.arpa/logout
-      - PAPERLESS_EMAIL_CERTIFICATE_FILE=/usr/src/paperless/data/root_2022_ca.crt
+      - PAPERLESS_EMAIL_CERTIFICATE_LOCATION=/usr/src/paperless/data/root_2022_ca.crt
     networks:
       - traefik_proxy
     labels:
