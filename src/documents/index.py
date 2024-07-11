@@ -5,6 +5,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime
 from datetime import timezone
+from shutil import rmtree
 from typing import Optional
 
 from dateutil.parser import isoparse
@@ -36,7 +37,6 @@ from whoosh.searching import Searcher
 from whoosh.util.times import timespan
 from whoosh.writing import AsyncWriter
 
-# from documents.models import CustomMetadata
 from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import Note
@@ -70,6 +70,8 @@ def get_schema():
         num_notes=NUMERIC(sortable=True, signed=False),
         custom_fields=TEXT(),
         custom_field_count=NUMERIC(sortable=True, signed=False),
+        has_custom_fields=BOOLEAN(),
+        custom_fields_id=KEYWORD(commas=True),
         owner=TEXT(),
         owner_id=NUMERIC(),
         has_owner=BOOLEAN(),
@@ -87,8 +89,11 @@ def open_index(recreate=False) -> FileIndex:
     except Exception:
         logger.exception("Error while opening the index, recreating.")
 
-    if not os.path.isdir(settings.INDEX_DIR):
-        os.makedirs(settings.INDEX_DIR, exist_ok=True)
+    # create_in doesn't handle corrupted indexes very well, remove the directory entirely first
+    if os.path.isdir(settings.INDEX_DIR):
+        rmtree(settings.INDEX_DIR)
+    settings.INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
     return create_in(settings.INDEX_DIR, get_schema())
 
 
@@ -121,6 +126,9 @@ def update_document(writer: AsyncWriter, doc: Document):
     notes = ",".join([str(c.note) for c in Note.objects.filter(document=doc)])
     custom_fields = ",".join(
         [str(c) for c in CustomFieldInstance.objects.filter(document=doc)],
+    )
+    custom_fields_ids = ",".join(
+        [str(f.field.id) for f in CustomFieldInstance.objects.filter(document=doc)],
     )
     asn = doc.archive_serial_number
     if asn is not None and (
@@ -163,6 +171,8 @@ def update_document(writer: AsyncWriter, doc: Document):
         num_notes=len(notes),
         custom_fields=custom_fields,
         custom_field_count=len(doc.custom_fields.all()),
+        has_custom_fields=len(custom_fields) > 0,
+        custom_fields_id=custom_fields_ids if custom_fields_ids else None,
         owner=doc.owner.username if doc.owner else None,
         owner_id=doc.owner.id if doc.owner else None,
         has_owner=doc.owner is not None,
@@ -203,7 +213,10 @@ class DelayedQuery:
         "created": ("created", ["date__lt", "date__gt"]),
         "checksum": ("checksum", ["icontains", "istartswith"]),
         "original_filename": ("original_filename", ["icontains", "istartswith"]),
-        "custom_fields": ("custom_fields", ["icontains", "istartswith"]),
+        "custom_fields": (
+            "custom_fields",
+            ["icontains", "istartswith", "id__all", "id__in", "id__none"],
+        ),
     }
 
     def _get_query(self):
@@ -215,6 +228,12 @@ class DelayedQuery:
             # is_tagged is a special case
             if key == "is_tagged":
                 criterias.append(query.Term("has_tag", self.evalBoolean(value)))
+                continue
+
+            if key == "has_custom_fields":
+                criterias.append(
+                    query.Term("has_custom_fields", self.evalBoolean(value)),
+                )
                 continue
 
             # Don't process query params without a filter
@@ -465,9 +484,13 @@ def autocomplete(
         termCounts = Counter()
         if results.has_matched_terms():
             for hit in results:
-                for _, term in hit.matched_terms():
-                    termCounts[term] += 1
+                for _, match in hit.matched_terms():
+                    termCounts[match] += 1
             terms = [t for t, _ in termCounts.most_common(limit)]
+
+        term_encoded = term.encode("UTF-8")
+        if term_encoded in terms:
+            terms.insert(0, terms.pop(terms.index(term_encoded)))
 
     return terms
 

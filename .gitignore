@@ -25,6 +25,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+/src/paperless_mail/templates/node_modules
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -68,6 +69,8 @@ target/
 .vscode
 /src-ui/.vscode
 /docs/.vscode
+.vscode-server
+*CommandMarker
 
 # Other stuff that doesn't belong
 .virtualenv
