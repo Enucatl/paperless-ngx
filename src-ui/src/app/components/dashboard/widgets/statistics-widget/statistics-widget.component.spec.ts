@@ -1,43 +1,43 @@
-import { TestBed } from '@angular/core/testing'
-import { StatisticsWidgetComponent } from './statistics-widget.component'
-import { ComponentFixture } from '@angular/core/testing'
+import { DragDropModule } from '@angular/cdk/drag-drop'
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
 import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing'
-import { NgbModule } from '@ng-bootstrap/ng-bootstrap'
-import { WidgetFrameComponent } from '../widget-frame/widget-frame.component'
-import { environment } from 'src/environments/environment'
+import { ComponentFixture, TestBed } from '@angular/core/testing'
 import { RouterTestingModule } from '@angular/router/testing'
-import { routes } from 'src/app/app-routing.module'
-import { PermissionsGuard } from 'src/app/guards/permissions.guard'
-import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
-import {
-  ConsumerStatusService,
-  FileStatus,
-} from 'src/app/services/consumer-status.service'
+import { NgbModule } from '@ng-bootstrap/ng-bootstrap'
 import { Subject } from 'rxjs'
-import { DragDropModule } from '@angular/cdk/drag-drop'
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
+import { routes } from 'src/app/app-routing.module'
+import { FILTER_MIME_TYPE } from 'src/app/data/filter-rule-type'
+import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
+import { PermissionsGuard } from 'src/app/guards/permissions.guard'
+import { DocumentListViewService } from 'src/app/services/document-list-view.service'
+import {
+  FileStatus,
+  WebsocketStatusService,
+} from 'src/app/services/websocket-status.service'
+import { environment } from 'src/environments/environment'
+import { WidgetFrameComponent } from '../widget-frame/widget-frame.component'
+import { StatisticsWidgetComponent } from './statistics-widget.component'
 
 describe('StatisticsWidgetComponent', () => {
   let component: StatisticsWidgetComponent
   let fixture: ComponentFixture<StatisticsWidgetComponent>
   let httpTestingController: HttpTestingController
-  let consumerStatusService: ConsumerStatusService
+  let websocketStatusService: WebsocketStatusService
+  let documentListViewService: DocumentListViewService
   const fileStatusSubject = new Subject<FileStatus>()
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
-      declarations: [
-        StatisticsWidgetComponent,
-        WidgetFrameComponent,
-        IfPermissionsDirective,
-      ],
       imports: [
         NgbModule,
         RouterTestingModule.withRoutes(routes),
         DragDropModule,
+        StatisticsWidgetComponent,
+        WidgetFrameComponent,
+        IfPermissionsDirective,
       ],
       providers: [
         PermissionsGuard,
@@ -47,10 +47,11 @@ describe('StatisticsWidgetComponent', () => {
     }).compileComponents()
 
     fixture = TestBed.createComponent(StatisticsWidgetComponent)
-    consumerStatusService = TestBed.inject(ConsumerStatusService)
+    websocketStatusService = TestBed.inject(WebsocketStatusService)
     jest
-      .spyOn(consumerStatusService, 'onDocumentConsumptionFinished')
+      .spyOn(websocketStatusService, 'onDocumentConsumptionFinished')
       .mockReturnValue(fileStatusSubject)
+    documentListViewService = TestBed.inject(DocumentListViewService)
     component = fixture.componentInstance
 
     httpTestingController = TestBed.inject(HttpTestingController)
@@ -71,11 +72,18 @@ describe('StatisticsWidgetComponent', () => {
     expect(reloadSpy).toHaveBeenCalled()
   })
 
+  it('should not call statistics endpoint on reload if already loading', () => {
+    httpTestingController.expectOne(`${environment.apiBaseUrl}statistics/`)
+    component.loading = true
+    component.reload()
+    httpTestingController.expectNone(`${environment.apiBaseUrl}statistics/`)
+  })
+
   it('should display inbox link with count', () => {
     const mockStats = {
       documents_total: 200,
       documents_inbox: 18,
-      inbox_tag: 10,
+      inbox_tags: [10],
     }
 
     const req = httpTestingController.expectOne(
@@ -100,7 +108,7 @@ describe('StatisticsWidgetComponent', () => {
     const mockStats = {
       documents_total: 200,
       documents_inbox: 18,
-      inbox_tag: 10,
+      inbox_tags: [10],
       document_file_type_counts: [
         {
           mime_type: 'application/pdf',
@@ -226,5 +234,27 @@ describe('StatisticsWidgetComponent', () => {
     expect(fixture.nativeElement.textContent.replace(/\s/g, '')).not.toContain(
       'CurrentASN:'
     )
+  })
+
+  it('should support quick filter by mime type', () => {
+    const qfSpy = jest.spyOn(documentListViewService, 'quickFilter')
+    component.filterByFileType({
+      mime_type: 'application/pdf',
+      mime_type_count: 160,
+    })
+    expect(qfSpy).toHaveBeenCalledWith([
+      {
+        rule_type: FILTER_MIME_TYPE,
+        value: 'application/pdf',
+      },
+    ])
+
+    qfSpy.mockClear()
+    component.filterByFileType({
+      mime_type: 'Other',
+      mime_type_count: 160,
+      is_other: true,
+    })
+    expect(qfSpy).not.toHaveBeenCalled()
   })
 })

@@ -8,17 +8,17 @@ common [OCR](#ocr) related settings and some frontend settings. If set, these wi
 preference over the settings via environment variables. If not set, the environment setting
 or applicable default will be utilized instead.
 
-- If you run paperless on docker, `paperless.conf` is not used.
-  Rather, configure paperless by copying necessary options to
-  `docker-compose.env`.
+-   If you run paperless on docker, `paperless.conf` is not used.
+    Rather, configure paperless by copying necessary options to
+    `docker-compose.env`.
 
-- If you are running paperless on anything else, paperless will search
-  for the configuration file in these locations and use the first one
-  it finds:
-  - The environment variable `PAPERLESS_CONFIGURATION_PATH`
-  - `/path/to/paperless/paperless.conf`
-  - `/etc/paperless.conf`
-  - `/usr/local/etc/paperless.conf`
+-   If you are running paperless on anything else, paperless will search
+    for the configuration file in these locations and use the first one
+    it finds:
+    -   The environment variable `PAPERLESS_CONFIGURATION_PATH`
+    -   `/path/to/paperless/paperless.conf`
+    -   `/etc/paperless.conf`
+    -   `/usr/local/etc/paperless.conf`
 
 ## Required services
 
@@ -38,7 +38,7 @@ matcher.
         `redis://<username>:<password>@<host>:<port>/<DBIndex>`
 
     [More information on securing your Redis
-    Instance](https://redis.io/docs/getting-started/#securing-redis).
+    Instance](https://redis.io/docs/latest/operate/oss_and_stack/management/security).
 
     Defaults to `redis://localhost:6379`.
 
@@ -197,6 +197,18 @@ Docker, this may be the `environment` key of the webserver or a
 `docker-compose.env` file. Bare metal installations may have a `.conf` file
 containing the configuration parameters. Be sure to use the correct format
 and watch out for indentation if editing the YAML file.
+
+### Email Parsing
+
+#### [`PAPERLESS_EMAIL_PARSE_DEFAULT_LAYOUT=<int>`(#PAPERLESS_EMAIL_PARSE_DEFAULT_LAYOUT) {#PAPERLESS_EMAIL_PARSE_DEFAULT_LAYOUT}
+
+: The default layout to use for emails that are consumed as documents. Must be one of the integer choices below. Note that mail
+rules can specify this setting, thus this fallback is used for the default selection and for .eml files consumed by other means.
+
+    - `1` = Text, then HTML
+    - `2` = HTML, then text
+    - `3` = HTML only
+    - `4` = Text only
 
 ## Paths and folders
 
@@ -392,7 +404,7 @@ set this value to /paperless. No trailing slash!
 #### [`PAPERLESS_STATIC_URL=<path>`](#PAPERLESS_STATIC_URL) {#PAPERLESS_STATIC_URL}
 
 : Override the STATIC_URL here. Unless you're hosting Paperless off a
-subdomain like /paperless/, you probably don't need to change this.
+specific path like /paperless/, you probably don't need to change this.
 If you do change it, be sure to include the trailing slash.
 
     Defaults to "/static/".
@@ -545,6 +557,20 @@ This is for use with self-signed certificates against local IMAP servers.
     Settings this value has security implications for the security of your email.
     Understand what it does and be sure you need to before setting.
 
+### Authentication & SSO {#authentication}
+
+#### [`PAPERLESS_ACCOUNT_ALLOW_SIGNUPS=<bool>`](#PAPERLESS_ACCOUNT_ALLOW_SIGNUPS) {#PAPERLESS_ACCOUNT_ALLOW_SIGNUPS}
+
+: Allow users to signup for a new Paperless-ngx account.
+
+    Defaults to False
+
+#### [`PAPERLESS_ACCOUNT_DEFAULT_GROUPS=<comma-separated-list>`](#PAPERLESS_ACCOUNT_DEFAULT_GROUPS) {#PAPERLESS_ACCOUNT_DEFAULT_GROUPS}
+
+: A list of group names that users will be added to when they sign up for a new account. Groups listed here must already exist.
+
+    Defaults to None
+
 #### [`PAPERLESS_SOCIALACCOUNT_PROVIDERS=<json>`](#PAPERLESS_SOCIALACCOUNT_PROVIDERS) {#PAPERLESS_SOCIALACCOUNT_PROVIDERS}
 
 : This variable is used to setup login and signup via social account providers which are compatible with django-allauth.
@@ -568,11 +594,24 @@ system. See the corresponding
 
     Defaults to True
 
-#### [`PAPERLESS_ACCOUNT_ALLOW_SIGNUPS=<bool>`](#PAPERLESS_ACCOUNT_ALLOW_SIGNUPS) {#PAPERLESS_ACCOUNT_ALLOW_SIGNUPS}
+#### [`PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS=<bool>`](#PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS) {#PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS}
 
-: Allow users to signup for a new Paperless-ngx account.
+: Sync groups from the third party authentication system (e.g. OIDC) to Paperless-ngx. When enabled, users will be added or removed from groups based on their group membership in the third party authentication system. Groups must already exist in Paperless-ngx and have the same name as in the third party authentication system. Groups are updated upon logging in via the third party authentication system, see the corresponding [django-allauth documentation](https://docs.allauth.org/en/dev/socialaccount/signals.html).
+
+: In order to pass groups from the authentication system you will need to update your [PAPERLESS_SOCIALACCOUNT_PROVIDERS](#PAPERLESS_SOCIALACCOUNT_PROVIDERS) setting by adding a top-level "SCOPES" setting which includes "groups", e.g.:
+
+    ```json
+    {"openid_connect":{"SCOPE": ["openid","profile","email","groups"]...
+    ```
 
     Defaults to False
+
+#### [`PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS=<comma-separated-list>`](#PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS) {#PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS}
+
+: A list of group names that users who signup via social accounts will be added to upon signup. Groups listed here must already exist.
+If both the [PAPERLESS_ACCOUNT_DEFAULT_GROUPS](#PAPERLESS_ACCOUNT_DEFAULT_GROUPS) setting and this setting are used, the user will be added to both sets of groups.
+
+    Defaults to None
 
 #### [`PAPERLESS_ACCOUNT_DEFAULT_HTTP_PROTOCOL=<string>`](#PAPERLESS_ACCOUNT_DEFAULT_HTTP_PROTOCOL) {#PAPERLESS_ACCOUNT_DEFAULT_HTTP_PROTOCOL}
 
@@ -596,11 +635,11 @@ system. See the corresponding
 
 : Disables the regular frontend username / password login, i.e. once you have setup SSO. Note that this setting does not disable the Django admin login nor logging in with local credentials via the API. To prevent access to the Django admin, consider blocking `/admin/` in your [web server or reverse proxy configuration](https://github.com/paperless-ngx/paperless-ngx/wiki/Using-a-Reverse-Proxy-with-Paperless-ngx).
 
-You can optionally also automatically redirect users to the SSO login with [PAPERLESS_REDIRECT_LOGIN_TO_SSO](#PAPERLESS_REDIRECT_LOGIN_TO_SSO)
+    You can optionally also automatically redirect users to the SSO login with [PAPERLESS_REDIRECT_LOGIN_TO_SSO](#PAPERLESS_REDIRECT_LOGIN_TO_SSO)
 
     Defaults to False
 
-#### ['PAPERLESS_REDIRECT_LOGIN_TO_SSO=<bool>`](#PAPERLESS_REDIRECT_LOGIN_TO_SSO) {#PAPERLESS_REDIRECT_LOGIN_TO_SSO}
+#### [`PAPERLESS_REDIRECT_LOGIN_TO_SSO=<bool>`](#PAPERLESS_REDIRECT_LOGIN_TO_SSO) {#PAPERLESS_REDIRECT_LOGIN_TO_SSO}
 
 : When this setting is enabled users will automatically be redirected (using javascript) to the first SSO provider login. You may still want to disable the frontend login form for clarity.
 
@@ -608,8 +647,17 @@ You can optionally also automatically redirect users to the SSO login with [PAPE
 
 #### [`PAPERLESS_ACCOUNT_SESSION_REMEMBER=<bool>`](#PAPERLESS_ACCOUNT_SESSION_REMEMBER) {#PAPERLESS_ACCOUNT_SESSION_REMEMBER}
 
-: See the corresponding
+: If false, sessions will expire at browser close, if true will use `PAPERLESS_SESSION_COOKIE_AGE` for expiration. See the corresponding
 [django-allauth documentation](https://docs.allauth.org/en/latest/account/configuration.html)
+
+    Defaults to True
+
+#### [`PAPERLESS_SESSION_COOKIE_AGE=<int>`](#PAPERLESS_SESSION_COOKIE_AGE) {#PAPERLESS_SESSION_COOKIE_AGE}
+
+: Login session cookie expiration. Applies if `PAPERLESS_ACCOUNT_SESSION_REMEMBER` is enabled. See the corresponding
+[django documentation](https://docs.djangoproject.com/en/5.1/ref/settings/#std-setting-SESSION_COOKIE_AGE)
+
+    Defaults to 1209600 (2 weeks)
 
 ## OCR settings {#ocr}
 
@@ -1009,6 +1057,11 @@ be used with caution!
 
 ## Document Consumption {#consume_config}
 
+#### [`PAPERLESS_CONSUMER_DISABLE=<bool>`](#PAPERLESS_CONSUMER_DISABLE) {#PAPERLESS_CONSUMER_DISABLE}
+
+: Completely disable the directory-based consumer in docker. If you don't plan to consume documents
+via the consumption directory, you can disable the consumer to save resources.
+
 #### [`PAPERLESS_CONSUMER_DELETE_DUPLICATES=<bool>`](#PAPERLESS_CONSUMER_DELETE_DUPLICATES) {#PAPERLESS_CONSUMER_DELETE_DUPLICATES}
 
 : When the consumer detects a duplicate document, it will not touch
@@ -1063,8 +1116,6 @@ or hidden folders some tools use to store data.
     Currently, "PYZBAR" (the default) or "ZXING" might be selected.
     If you have problems that your Barcodes/QR-Codes are not detected
     (especially with bad scan quality and/or small codes), try the other one.
-
-    zxing is not available on all platforms.
 
 #### [`PAPERLESS_PRE_CONSUME_SCRIPT=<filename>`](#PAPERLESS_PRE_CONSUME_SCRIPT) {#PAPERLESS_PRE_CONSUME_SCRIPT}
 
@@ -1149,6 +1200,12 @@ within your documents.
     second, and year last order. Characters D, M, or Y can be shuffled
     to meet the required order.
 
+#### [`PAPERLESS_ENABLE_GPG_DECRYPTOR=<bool>`](#PAPERLESS_ENABLE_GPG_DECRYPTOR) {#PAPERLESS_ENABLE_GPG_DECRYPTOR}
+
+: Enable or disable the GPG decryptor for encrypted emails. See [GPG Decryptor](advanced_usage.md#gpg-decryptor) for more information.
+
+    Defaults to false.
+
 ### Polling {#polling}
 
 #### [`PAPERLESS_CONSUMER_POLLING=<num>`](#PAPERLESS_CONSUMER_POLLING) {#PAPERLESS_CONSUMER_POLLING}
@@ -1192,6 +1249,52 @@ consumers working on the same file. Configure this to prevent that.
 
     Defaults to 0.5 seconds.
 
+## Incoming Mail {#incoming_mail}
+
+### Email OAuth {#email_oauth}
+
+#### [`PAPERLESS_OAUTH_CALLBACK_BASE_URL=<str>`](#PAPERLESS_OAUTH_CALLBACK_BASE_URL) {#PAPERLESS_OAUTH_CALLBACK_BASE_URL}
+
+: The base URL for the OAuth callback. This is used to construct the full URL for the OAuth callback. This should be the URL that the Paperless instance is accessible at. If not set, defaults to the `PAPERLESS_URL` setting. At least one of these settings must be set to enable OAuth Email setup.
+
+    Defaults to none (thus will use [PAPERLESS_URL](#PAPERLESS_URL)).
+
+!!! note
+
+    This setting only applies to OAuth Email setup (not to the SSO setup).
+
+#### [`PAPERLESS_GMAIL_OAUTH_CLIENT_ID=<str>`](#PAPERLESS_GMAIL_OAUTH_CLIENT_ID) {#PAPERLESS_GMAIL_OAUTH_CLIENT_ID}
+
+: The OAuth client ID for Gmail. This is required for Gmail OAuth Email setup. See [OAuth Email Setup](usage.md#oauth-email-setup) for more information.
+
+    Defaults to none.
+
+#### [`PAPERLESS_GMAIL_OAUTH_CLIENT_SECRET=<str>`](#PAPERLESS_GMAIL_OAUTH_CLIENT_SECRET) {#PAPERLESS_GMAIL_OAUTH_CLIENT_SECRET}
+
+: The OAuth client secret for Gmail. This is required for Gmail OAuth Email setup. See [OAuth Email Setup](usage.md#oauth-email-setup) for more information.
+
+    Defaults to none.
+
+#### [`PAPERLESS_OUTLOOK_OAUTH_CLIENT_ID=<str>`](#PAPERLESS_OUTLOOK_OAUTH_CLIENT_ID) {#PAPERLESS_OUTLOOK_OAUTH_CLIENT_ID}
+
+: The OAuth client ID for Outlook. This is required for Outlook OAuth Email setup. See [OAuth Email Setup](usage.md#oauth-email-setup) for more information.
+
+    Defaults to none.
+
+#### [`PAPERLESS_OUTLOOK_OAUTH_CLIENT_SECRET=<str>`](#PAPERLESS_OUTLOOK_OAUTH_CLIENT_SECRET) {#PAPERLESS_OUTLOOK_OAUTH_CLIENT_SECRET}
+
+: The OAuth client secret for Outlook. This is required for Outlook OAuth Email setup. See [OAuth Email Setup](usage.md#oauth-email-setup) for more information.
+
+    Defaults to none.
+
+### Encrypted Emails {#encrypted_emails}
+
+#### [`PAPERLESS_EMAIL_GNUPG_HOME=<str>`](#PAPERLESS_EMAIL_GNUPG_HOME) {#PAPERLESS_EMAIL_GNUPG_HOME}
+
+: Optional, sets the `GNUPG_HOME` path to use with GPG decryptor for encrypted emails. See [GPG Decryptor](advanced_usage.md#gpg-decryptor) for more information. If not set, defaults to the default `GNUPG_HOME` path.
+
+    Defaults to <not set>.
+
 ## Barcodes {#barcodes}
 
 #### [`PAPERLESS_CONSUMER_ENABLE_BARCODES=<bool>`](#PAPERLESS_CONSUMER_ENABLE_BARCODES) {#PAPERLESS_CONSUMER_ENABLE_BARCODES}
@@ -1229,6 +1332,12 @@ paperless is used with the PATCH-T separator pages, users shouldn't
 change this.
 
     Defaults to "PATCHT"
+
+#### [`PAPERLESS_CONSUMER_BARCODE_RETAIN_SPLIT_PAGES=<bool>`](#PAPERLESS_CONSUMER_BARCODE_RETAIN_SPLIT_PAGES) {#PAPERLESS_CONSUMER_BARCODE_RETAIN_SPLIT_PAGES}
+
+: If set to true, all pages that are split by a barcode (such as PATCHT) will be kept.
+
+    Defaults to false.
 
 #### [`PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE=<bool>`](#PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE) {#PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE}
 
@@ -1276,6 +1385,15 @@ fails a bigger dpi value i.e. 600 can fix the issue. Try using in
 combination with PAPERLESS_CONSUMER_BARCODE_UPSCALE bigger than 1.0.
 
     Defaults to "300"
+
+#### [`PAPERLESS_CONSUMER_BARCODE_MAX_PAGES=<int>`](#PAPERLESS_CONSUMER_BARCODE_MAX_PAGES) {#PAPERLESS_CONSUMER_BARCODE_MAX_PAGES}
+
+: Because barcode detection is a computationally-intensive operation, this setting
+limits the detection of barcodes to a number of first pages. If your scanner has
+a limit for the number of pages that can be scanned it would be sensible to set this
+as the limit here.
+
+    Defaults to "0", allowing all pages to be checked for barcodes.
 
 #### [`PAPERLESS_CONSUMER_ENABLE_TAG_BARCODE=<bool>`](#PAPERLESS_CONSUMER_ENABLE_TAG_BARCODE) {#PAPERLESS_CONSUMER_ENABLE_TAG_BARCODE}
 
@@ -1420,13 +1538,23 @@ increase RAM usage.
 
     Defaults to 1.
 
+    !!! note
+
+         This option may also be set with `GRANIAN_WORKERS` and
+         this option may be removed in the future
+
 #### [`PAPERLESS_BIND_ADDR=<ip address>`](#PAPERLESS_BIND_ADDR) {#PAPERLESS_BIND_ADDR}
 
 : The IP address the webserver will listen on inside the container.
 There are special setups where you may need to configure this value
 to restrict the Ip address or interface the webserver listens on.
 
-    Defaults to `[::]`, meaning all interfaces, including IPv6.
+    Defaults to `::`, meaning all interfaces, including IPv6.
+
+    !!! note
+
+         This option may also be set with `GRANIAN_HOST` and
+         this option may be removed in the future
 
 #### [`PAPERLESS_PORT=<port>`](#PAPERLESS_PORT) {#PAPERLESS_PORT}
 
@@ -1441,13 +1569,18 @@ one pod).
 
     Defaults to 8000.
 
+    !!! note
+
+         This option may also be set with `GRANIAN_PORT` and
+         this option may be removed in the future
+
 #### [`USERMAP_UID=<uid>`](#USERMAP_UID) {#USERMAP_UID}
 
 : The ID of the paperless user in the container. Set this to your
 actual user ID on the host system, which you can get by executing
 
     ``` shell-session
-    $ id -u
+    id -u
     ```
 
     Paperless will change ownership on its folders to this user, so you
@@ -1462,7 +1595,7 @@ actual user ID on the host system, which you can get by executing
 actual group ID on the host system, which you can get by executing
 
     ``` shell-session
-    $ id -g
+    id -g
     ```
 
     Paperless will change ownership on its folders to this group, so you
@@ -1510,9 +1643,11 @@ started by the container.
 
 #### [`PAPERLESS_SUPERVISORD_WORKING_DIR=<defined>`](#PAPERLESS_SUPERVISORD_WORKING_DIR) {#PAPERLESS_SUPERVISORD_WORKING_DIR}
 
-: If this environment variable is defined, the `supervisord.log` and `supervisord.pid` file will be created under the specified path in `PAPERLESS_SUPERVISORD_WORKING_DIR`. Setting `PAPERLESS_SUPERVISORD_WORKING_DIR=/tmp` and `PYTHONPYCACHEPREFIX=/tmp/pycache` would allow paperless to work on a read-only filesystem.
+!!! warning
 
-    Please take note that the `PAPERLESS_DATA_DIR` and `PAPERLESS_MEDIA_ROOT` paths still have to be writable, just like the `PAPERLESS_SUPERVISORD_WORKING_DIR`. The can be archived by using bind or volume mounts. Only works in the container is run as user *paperless*
+        This option is deprecated and has no effect.  For read only file system support,
+        see [S6_READ_ONLY_ROOT](https://github.com/just-containers/s6-overlay#customizing-s6-overlay-behaviour)
+        from s6-overlay.
 
 ## Frontend Settings
 

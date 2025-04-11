@@ -47,6 +47,7 @@ nosetests.xml
 coverage.xml
 *,cover
 .pytest_cache
+junit.xml
 
 # Translations
 *.mo
@@ -103,3 +104,9 @@ scripts/nuke
 
 # celery schedule file
 celerybeat-schedule*
+
+# ignore .devcontainer sub folders
+/.devcontainer/consume/
+/.devcontainer/data/
+/.devcontainer/media/
+/.devcontainer/redisdata/

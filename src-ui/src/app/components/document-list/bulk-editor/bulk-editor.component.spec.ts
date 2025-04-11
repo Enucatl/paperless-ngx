@@ -1,64 +1,44 @@
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
 import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing'
 import { ComponentFixture, TestBed } from '@angular/core/testing'
-import { FormsModule, ReactiveFormsModule } from '@angular/forms'
 import { By } from '@angular/platform-browser'
-import {
-  NgbModal,
-  NgbModule,
-  NgbModalModule,
-  NgbModalRef,
-} from '@ng-bootstrap/ng-bootstrap'
+import { NgbModal, NgbModalRef } from '@ng-bootstrap/ng-bootstrap'
+import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
 import { of, throwError } from 'rxjs'
-import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
+import { Correspondent } from 'src/app/data/correspondent'
+import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
+import { DocumentType } from 'src/app/data/document-type'
+import { Results } from 'src/app/data/results'
+import { StoragePath } from 'src/app/data/storage-path'
+import { Tag } from 'src/app/data/tag'
 import { FilterPipe } from 'src/app/pipes/filter.pipe'
-import { SafeHtmlPipe } from 'src/app/pipes/safehtml.pipe'
 import { DocumentListViewService } from 'src/app/services/document-list-view.service'
 import { PermissionsService } from 'src/app/services/permissions.service'
 import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
+import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
 import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
 import {
-  SelectionData,
   DocumentService,
+  SelectionData,
 } from 'src/app/services/rest/document.service'
+import { GroupService } from 'src/app/services/rest/group.service'
 import { StoragePathService } from 'src/app/services/rest/storage-path.service'
 import { TagService } from 'src/app/services/rest/tag.service'
+import { UserService } from 'src/app/services/rest/user.service'
 import { SettingsService } from 'src/app/services/settings.service'
 import { ToastService } from 'src/app/services/toast.service'
 import { environment } from 'src/environments/environment'
-import { ConfirmDialogComponent } from '../../common/confirm-dialog/confirm-dialog.component'
-import { FilterableDropdownComponent } from '../../common/filterable-dropdown/filterable-dropdown.component'
-import { ToggleableDropdownButtonComponent } from '../../common/filterable-dropdown/toggleable-dropdown-button/toggleable-dropdown-button.component'
-import { PermissionsDialogComponent } from '../../common/permissions-dialog/permissions-dialog.component'
-import { PermissionsFormComponent } from '../../common/input/permissions/permissions-form/permissions-form.component'
-import { BulkEditorComponent } from './bulk-editor.component'
-import { SelectComponent } from '../../common/input/select/select.component'
-import { UserService } from 'src/app/services/rest/user.service'
-import { PermissionsGroupComponent } from '../../common/input/permissions/permissions-group/permissions-group.component'
-import { PermissionsUserComponent } from '../../common/input/permissions/permissions-user/permissions-user.component'
-import { NgSelectModule } from '@ng-select/ng-select'
-import { GroupService } from 'src/app/services/rest/group.service'
-import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
-import { SwitchComponent } from '../../common/input/switch/switch.component'
-import { EditDialogMode } from '../../common/edit-dialog/edit-dialog.component'
-import { TagEditDialogComponent } from '../../common/edit-dialog/tag-edit-dialog/tag-edit-dialog.component'
-import { Results } from 'src/app/data/results'
-import { Tag } from 'src/app/data/tag'
-import { Correspondent } from 'src/app/data/correspondent'
-import { DocumentType } from 'src/app/data/document-type'
-import { StoragePath } from 'src/app/data/storage-path'
 import { CorrespondentEditDialogComponent } from '../../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
-import { DocumentTypeEditDialogComponent } from '../../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
-import { StoragePathEditDialogComponent } from '../../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
-import { IsNumberPipe } from 'src/app/pipes/is-number.pipe'
-import { RotateConfirmDialogComponent } from '../../common/confirm-dialog/rotate-confirm-dialog/rotate-confirm-dialog.component'
-import { MergeConfirmDialogComponent } from '../../common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component'
-import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
-import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
 import { CustomFieldEditDialogComponent } from '../../common/edit-dialog/custom-field-edit-dialog/custom-field-edit-dialog.component'
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
+import { DocumentTypeEditDialogComponent } from '../../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
+import { EditDialogMode } from '../../common/edit-dialog/edit-dialog.component'
+import { StoragePathEditDialogComponent } from '../../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
+import { TagEditDialogComponent } from '../../common/edit-dialog/tag-edit-dialog/tag-edit-dialog.component'
+import { FilterableDropdownComponent } from '../../common/filterable-dropdown/filterable-dropdown.component'
+import { BulkEditorComponent } from './bulk-editor.component'
 
 const selectionData: SelectionData = {
   selected_tags: [
@@ -95,32 +75,7 @@ describe('BulkEditorComponent', () => {
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
-      declarations: [
-        BulkEditorComponent,
-        IfPermissionsDirective,
-        FilterableDropdownComponent,
-        ToggleableDropdownButtonComponent,
-        FilterPipe,
-        ConfirmDialogComponent,
-        SafeHtmlPipe,
-        PermissionsDialogComponent,
-        PermissionsFormComponent,
-        SelectComponent,
-        PermissionsGroupComponent,
-        PermissionsUserComponent,
-        SwitchComponent,
-        RotateConfirmDialogComponent,
-        IsNumberPipe,
-        MergeConfirmDialogComponent,
-      ],
-      imports: [
-        FormsModule,
-        ReactiveFormsModule,
-        NgbModule,
-        NgbModalModule,
-        NgSelectModule,
-        NgxBootstrapIconsModule.pick(allIcons),
-      ],
+      imports: [BulkEditorComponent, NgxBootstrapIconsModule.pick(allIcons)],
       providers: [
         PermissionsService,
         {
@@ -1084,6 +1039,28 @@ describe('BulkEditorComponent', () => {
     httpTestingController.match(
       `${environment.apiBaseUrl}documents/?page=1&page_size=100000&fields=id`
     ) // listAllFilteredIds
+    expect(documentListViewService.selected.size).toEqual(0)
+
+    // Test with archiveFallback enabled
+    modal.componentInstance.deleteOriginals = false
+    modal.componentInstance.archiveFallback = true
+    modal.componentInstance.confirm()
+    req = httpTestingController.expectOne(
+      `${environment.apiBaseUrl}documents/bulk_edit/`
+    )
+    req.flush(true)
+    expect(req.request.body).toEqual({
+      documents: [3, 4],
+      method: 'merge',
+      parameters: { metadata_document_id: 3, archive_fallback: true },
+    })
+    httpTestingController.match(
+      `${environment.apiBaseUrl}documents/?page=1&page_size=50&ordering=-created&truncate_content=true`
+    ) // list reload
+    httpTestingController.match(
+      `${environment.apiBaseUrl}documents/?page=1&page_size=100000&fields=id`
+    ) // listAllFilteredIds
+    expect(documentListViewService.selected.size).toEqual(0)
   })
 
   it('should support bulk download with archive, originals or both and file formatting', () => {
@@ -1173,10 +1150,10 @@ describe('BulkEditorComponent', () => {
 
   it('should not attempt to retrieve objects if user does not have permissions', () => {
     jest.spyOn(permissionsService, 'currentUserCan').mockReturnValue(true)
-    expect(component.tags).toBeUndefined()
-    expect(component.correspondents).toBeUndefined()
-    expect(component.documentTypes).toBeUndefined()
-    expect(component.storagePaths).toBeUndefined()
+    expect(component.tagSelectionModel.items.length).toEqual(0)
+    expect(component.correspondentSelectionModel.items.length).toEqual(0)
+    expect(component.documentTypeSelectionModel.items.length).toEqual(0)
+    expect(component.storagePathsSelectionModel.items.length).toEqual(0)
     httpTestingController.expectNone(`${environment.apiBaseUrl}documents/tags/`)
     httpTestingController.expectNone(
       `${environment.apiBaseUrl}documents/correspondents/`
@@ -1227,7 +1204,9 @@ describe('BulkEditorComponent', () => {
     expect(tagListAllSpy).toHaveBeenCalled()
 
     expect(tagSelectionModelToggleSpy).toHaveBeenCalledWith(newTag.id)
-    expect(component.tags).toEqual(tags.results)
+    expect(component.tagSelectionModel.items).toEqual(
+      [{ id: null, name: 'Not assigned' }].concat(tags.results as any)
+    )
   })
 
   it('should support create new correspondent', () => {
@@ -1274,7 +1253,9 @@ describe('BulkEditorComponent', () => {
     expect(correspondentSelectionModelToggleSpy).toHaveBeenCalledWith(
       newCorrespondent.id
     )
-    expect(component.correspondents).toEqual(correspondents.results)
+    expect(component.correspondentSelectionModel.items).toEqual(
+      [{ id: null, name: 'Not assigned' }].concat(correspondents.results as any)
+    )
   })
 
   it('should support create new document type', () => {
@@ -1318,7 +1299,9 @@ describe('BulkEditorComponent', () => {
     expect(documentTypeSelectionModelToggleSpy).toHaveBeenCalledWith(
       newDocumentType.id
     )
-    expect(component.documentTypes).toEqual(documentTypes.results)
+    expect(component.documentTypeSelectionModel.items).toEqual(
+      [{ id: null, name: 'Not assigned' }].concat(documentTypes.results as any)
+    )
   })
 
   it('should support create new storage path', () => {
@@ -1362,7 +1345,9 @@ describe('BulkEditorComponent', () => {
     expect(storagePathsSelectionModelToggleSpy).toHaveBeenCalledWith(
       newStoragePath.id
     )
-    expect(component.storagePaths).toEqual(storagePaths.results)
+    expect(component.storagePathsSelectionModel.items).toEqual(
+      [{ id: null, name: 'Not assigned' }].concat(storagePaths.results as any)
+    )
   })
 
   it('should support create new custom field', () => {
@@ -1414,6 +1399,59 @@ describe('BulkEditorComponent', () => {
     expect(customFieldsSelectionModelToggleSpy).toHaveBeenCalledWith(
       newCustomField.id
     )
-    expect(component.customFields).toEqual(customFields.results)
+    expect(component.customFieldsSelectionModel.items).toEqual(
+      [{ id: null, name: 'Not assigned' }].concat(customFields.results as any)
+    )
+  })
+
+  it('should open the bulk edit custom field values dialog with correct parameters', () => {
+    let modal: NgbModalRef
+    modalService.activeInstances.subscribe((m) => (modal = m[0]))
+    jest.spyOn(permissionsService, 'currentUserCan').mockReturnValue(true)
+    jest
+      .spyOn(documentListViewService, 'documents', 'get')
+      .mockReturnValue([{ id: 3 }, { id: 4 }])
+    jest.spyOn(documentService, 'getFew').mockReturnValue(
+      of({
+        all: [3, 4],
+        count: 2,
+        results: [{ id: 3 }, { id: 4 }],
+      })
+    )
+    jest
+      .spyOn(documentListViewService, 'selected', 'get')
+      .mockReturnValue(new Set([3, 4]))
+    fixture.detectChanges()
+    const toastServiceShowInfoSpy = jest.spyOn(toastService, 'showInfo')
+    const toastServiceShowErrorSpy = jest.spyOn(toastService, 'showError')
+    const listReloadSpy = jest.spyOn(documentListViewService, 'reload')
+
+    component.customFieldsSelectionModel.items = [
+      { id: 1, name: 'Custom Field 1', data_type: CustomFieldDataType.String },
+      { id: 2, name: 'Custom Field 2', data_type: CustomFieldDataType.String },
+    ] as any
+
+    component.setCustomFieldValues({
+      itemsToAdd: [{ id: 1 }, { id: 2 }],
+      itemsToRemove: [1],
+    } as any)
+
+    expect(modal.componentInstance.customFields.length).toEqual(2)
+    expect(modal.componentInstance.fieldsToAddIds).toEqual([1, 2])
+    expect(modal.componentInstance.documents).toEqual([3, 4])
+
+    modal.componentInstance.failed.emit()
+    expect(toastServiceShowErrorSpy).toHaveBeenCalled()
+    expect(listReloadSpy).not.toHaveBeenCalled()
+
+    modal.componentInstance.succeeded.emit()
+    expect(toastServiceShowInfoSpy).toHaveBeenCalled()
+    expect(listReloadSpy).toHaveBeenCalled()
+    httpTestingController.match(
+      `${environment.apiBaseUrl}documents/?page=1&page_size=50&ordering=-created&truncate_content=true`
+    ) // list reload
+    httpTestingController.match(
+      `${environment.apiBaseUrl}documents/?page=1&page_size=100000&fields=id`
+    ) // listAllFilteredIds
   })
 })

@@ -1,19 +1,19 @@
-import { TestBed } from '@angular/core/testing'
-import { UploadDocumentsService } from './upload-documents.service'
-import {
-  HttpTestingController,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing'
-import { environment } from 'src/environments/environment'
 import {
   HttpEventType,
   provideHttpClient,
   withInterceptorsFromDi,
 } from '@angular/common/http'
 import {
-  ConsumerStatusService,
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing'
+import { TestBed } from '@angular/core/testing'
+import { environment } from 'src/environments/environment'
+import { UploadDocumentsService } from './upload-documents.service'
+import {
   FileStatusPhase,
-} from './consumer-status.service'
+  WebsocketStatusService,
+} from './websocket-status.service'
 
 const files = [
   {
@@ -45,14 +45,14 @@ const fileList = {
 describe('UploadDocumentsService', () => {
   let httpTestingController: HttpTestingController
   let uploadDocumentsService: UploadDocumentsService
-  let consumerStatusService: ConsumerStatusService
+  let websocketStatusService: WebsocketStatusService
 
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [],
       providers: [
         UploadDocumentsService,
-        ConsumerStatusService,
+        WebsocketStatusService,
         provideHttpClient(withInterceptorsFromDi()),
         provideHttpClientTesting(),
       ],
@@ -60,7 +60,7 @@ describe('UploadDocumentsService', () => {
 
     httpTestingController = TestBed.inject(HttpTestingController)
     uploadDocumentsService = TestBed.inject(UploadDocumentsService)
-    consumerStatusService = TestBed.inject(ConsumerStatusService)
+    websocketStatusService = TestBed.inject(WebsocketStatusService)
   })
 
   afterEach(() => {
@@ -80,11 +80,11 @@ describe('UploadDocumentsService', () => {
   it('updates progress during upload and failure', () => {
     uploadDocumentsService.uploadFiles(fileList)
 
-    expect(consumerStatusService.getConsumerStatusNotCompleted()).toHaveLength(
+    expect(websocketStatusService.getConsumerStatusNotCompleted()).toHaveLength(
       2
     )
     expect(
-      consumerStatusService.getConsumerStatus(FileStatusPhase.UPLOADING)
+      websocketStatusService.getConsumerStatus(FileStatusPhase.UPLOADING)
     ).toHaveLength(0)
 
     const req = httpTestingController.match(
@@ -98,7 +98,7 @@ describe('UploadDocumentsService', () => {
     })
 
     expect(
-      consumerStatusService.getConsumerStatus(FileStatusPhase.UPLOADING)
+      websocketStatusService.getConsumerStatus(FileStatusPhase.UPLOADING)
     ).toHaveLength(1)
   })
 
@@ -110,7 +110,7 @@ describe('UploadDocumentsService', () => {
     )
 
     expect(
-      consumerStatusService.getConsumerStatus(FileStatusPhase.FAILED)
+      websocketStatusService.getConsumerStatus(FileStatusPhase.FAILED)
     ).toHaveLength(0)
 
     req[0].flush(
@@ -122,7 +122,7 @@ describe('UploadDocumentsService', () => {
     )
 
     expect(
-      consumerStatusService.getConsumerStatus(FileStatusPhase.FAILED)
+      websocketStatusService.getConsumerStatus(FileStatusPhase.FAILED)
     ).toHaveLength(1)
 
     uploadDocumentsService.uploadFiles(fileList)
@@ -140,7 +140,7 @@ describe('UploadDocumentsService', () => {
     )
 
     expect(
-      consumerStatusService.getConsumerStatus(FileStatusPhase.FAILED)
+      websocketStatusService.getConsumerStatus(FileStatusPhase.FAILED)
     ).toHaveLength(2)
   })
 

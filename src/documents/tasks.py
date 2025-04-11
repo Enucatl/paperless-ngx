@@ -5,12 +5,13 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional
 
 import tqdm
 from celery import Task
 from celery import shared_task
+from celery import states
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -32,10 +33,15 @@ from documents.double_sided import CollatePlugin
 from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_unique_filename
 from documents.models import Correspondent
+from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
+from documents.models import PaperlessTask
 from documents.models import StoragePath
 from documents.models import Tag
+from documents.models import Workflow
+from documents.models import WorkflowRun
+from documents.models import WorkflowTrigger
 from documents.parsers import DocumentParser
 from documents.parsers import get_parser_class_for_mime_type
 from documents.plugins.base import ConsumeTaskPlugin
@@ -45,10 +51,9 @@ from documents.plugins.helpers import ProgressStatusOptions
 from documents.sanity_checker import SanityCheckFailedException
 from documents.signals import document_updated
 from documents.signals.handlers import cleanup_document_deletion
+from documents.signals.handlers import run_workflows
 
 if settings.AUDIT_LOG_ENABLED:
-    import json
-
     from auditlog.models import LogEntry
 logger = logging.getLogger("paperless.tasks")
 
@@ -60,7 +65,7 @@ def index_optimize():
     writer.commit(optimize=True)
 
 
-def index_reindex(progress_bar_disable=False):
+def index_reindex(*, progress_bar_disable=False):
     documents = Document.objects.all()
 
     ix = index.open_index(recreate=True)
@@ -71,19 +76,34 @@ def index_reindex(progress_bar_disable=False):
 
 
 @shared_task
-def train_classifier():
+def train_classifier(*, scheduled=True):
+    task = PaperlessTask.objects.create(
+        type=PaperlessTask.TaskType.SCHEDULED_TASK
+        if scheduled
+        else PaperlessTask.TaskType.MANUAL_TASK,
+        task_id=uuid.uuid4(),
+        task_name=PaperlessTask.TaskName.TRAIN_CLASSIFIER,
+        status=states.STARTED,
+        date_created=timezone.now(),
+        date_started=timezone.now(),
+    )
     if (
         not Tag.objects.filter(matching_algorithm=Tag.MATCH_AUTO).exists()
         and not DocumentType.objects.filter(matching_algorithm=Tag.MATCH_AUTO).exists()
         and not Correspondent.objects.filter(matching_algorithm=Tag.MATCH_AUTO).exists()
         and not StoragePath.objects.filter(matching_algorithm=Tag.MATCH_AUTO).exists()
     ):
-        logger.info("No automatic matching items, not training")
+        result = "No automatic matching items, not training"
+        logger.info(result)
         # Special case, items were once auto and trained, so remove the model
         # and prevent its use again
         if settings.MODEL_FILE.exists():
             logger.info(f"Removing {settings.MODEL_FILE} so it won't be used")
             settings.MODEL_FILE.unlink()
+        task.status = states.SUCCESS
+        task.result = result
+        task.date_done = timezone.now()
+        task.save()
         return
 
     classifier = load_classifier()
@@ -97,18 +117,26 @@ def train_classifier():
                 f"Saving updated classifier model to {settings.MODEL_FILE}...",
             )
             classifier.save()
+            task.result = "Training completed successfully"
         else:
             logger.debug("Training data unchanged.")
+            task.result = "Training data unchanged"
+
+        task.status = states.SUCCESS
+        task.date_done = timezone.now()
+        task.save(update_fields=["status", "result", "date_done"])
 
     except Exception as e:
         logger.warning("Classifier error: " + str(e))
+        task.status = states.FAILURE
+        task.result = str(e)
 
 
 @shared_task(bind=True)
 def consume_file(
     self: Task,
     input_doc: ConsumableDocument,
-    overrides: Optional[DocumentMetadataOverrides] = None,
+    overrides: DocumentMetadataOverrides | None = None,
 ):
     # Default no overrides
     if overrides is None:
@@ -173,13 +201,16 @@ def consume_file(
 
 
 @shared_task
-def sanity_check():
-    messages = sanity_checker.check_sanity()
+def sanity_check(*, scheduled=True, raise_on_error=True):
+    messages = sanity_checker.check_sanity(scheduled=scheduled)
 
     messages.log_messages()
 
     if messages.has_error:
-        raise SanityCheckFailedException("Sanity check failed with errors. See log.")
+        message = "Sanity check exited with errors. See log."
+        if raise_on_error:
+            raise SanityCheckFailedException(message)
+        return message
     elif messages.has_warning:
         return "Sanity check exited with warnings. See log."
     elif len(messages) > 0:
@@ -209,9 +240,10 @@ def bulk_update_documents(document_ids):
 
 
 @shared_task
-def update_document_archive_file(document_id):
+def update_document_content_maybe_archive_file(document_id):
     """
-    Re-creates the archive file of a document, including new OCR content and thumbnail
+    Re-creates OCR content and thumbnail for a document, and archive file if
+    it exists.
     """
     document = Document.objects.get(id=document_id)
 
@@ -237,9 +269,10 @@ def update_document_archive_file(document_id):
             document.get_public_filename(),
         )
 
-        if parser.get_archive_path():
-            with transaction.atomic():
-                with open(parser.get_archive_path(), "rb") as f:
+        with transaction.atomic():
+            oldDocument = Document.objects.get(pk=document.pk)
+            if parser.get_archive_path():
+                with Path(parser.get_archive_path()).open("rb") as f:
                     checksum = hashlib.md5(f.read()).hexdigest()
                 # I'm going to save first so that in case the file move
                 # fails, the database is rolled back.
@@ -249,7 +282,6 @@ def update_document_archive_file(document_id):
                     document,
                     archive_filename=True,
                 )
-                oldDocument = Document.objects.get(pk=document.pk)
                 Document.objects.filter(pk=document.pk).update(
                     archive_checksum=checksum,
                     content=parser.get_text(),
@@ -259,40 +291,53 @@ def update_document_archive_file(document_id):
                 if settings.AUDIT_LOG_ENABLED:
                     LogEntry.objects.log_create(
                         instance=oldDocument,
-                        changes=json.dumps(
-                            {
-                                "content": [oldDocument.content, newDocument.content],
-                                "archive_checksum": [
-                                    oldDocument.archive_checksum,
-                                    newDocument.archive_checksum,
-                                ],
-                                "archive_filename": [
-                                    oldDocument.archive_filename,
-                                    newDocument.archive_filename,
-                                ],
-                            },
-                        ),
-                        additional_data=json.dumps(
-                            {
-                                "reason": "Redo OCR called",
-                            },
-                        ),
+                        changes={
+                            "content": [oldDocument.content, newDocument.content],
+                            "archive_checksum": [
+                                oldDocument.archive_checksum,
+                                newDocument.archive_checksum,
+                            ],
+                            "archive_filename": [
+                                oldDocument.archive_filename,
+                                newDocument.archive_filename,
+                            ],
+                        },
+                        additional_data={
+                            "reason": "Update document content",
+                        },
+                        action=LogEntry.Action.UPDATE,
+                    )
+            else:
+                Document.objects.filter(pk=document.pk).update(
+                    content=parser.get_text(),
+                )
+
+                if settings.AUDIT_LOG_ENABLED:
+                    LogEntry.objects.log_create(
+                        instance=oldDocument,
+                        changes={
+                            "content": [oldDocument.content, parser.get_text()],
+                        },
+                        additional_data={
+                            "reason": "Update document content",
+                        },
                         action=LogEntry.Action.UPDATE,
                     )
 
-                with FileLock(settings.MEDIA_LOCK):
+            with FileLock(settings.MEDIA_LOCK):
+                if parser.get_archive_path():
                     create_source_path_directory(document.archive_path)
                     shutil.move(parser.get_archive_path(), document.archive_path)
-                    shutil.move(thumbnail, document.thumbnail_path)
+                shutil.move(thumbnail, document.thumbnail_path)
 
-            document.refresh_from_db()
-            logger.info(
-                f"Updating index for document {document_id} ({document.archive_checksum})",
-            )
-            with index.open_index_writer() as writer:
-                index.update_document(writer, document)
+        document.refresh_from_db()
+        logger.info(
+            f"Updating index for document {document_id} ({document.archive_checksum})",
+        )
+        with index.open_index_writer() as writer:
+            index.update_document(writer, document)
 
-            clear_document_caches(document.pk)
+        clear_document_caches(document.pk)
 
     except Exception:
         logger.exception(
@@ -304,6 +349,8 @@ def update_document_archive_file(document_id):
 
 @shared_task
 def empty_trash(doc_ids=None):
+    if doc_ids is None:
+        logger.info("Emptying trash of all expired documents")
     documents = (
         Document.deleted_objects.filter(id__in=doc_ids)
         if doc_ids is not None
@@ -316,9 +363,18 @@ def empty_trash(doc_ids=None):
     )
 
     try:
+        deleted_document_ids = list(documents.values_list("id", flat=True))
         # Temporarily connect the cleanup handler
         models.signals.post_delete.connect(cleanup_document_deletion, sender=Document)
         documents.delete()  # this is effectively a hard delete
+        logger.info(f"Deleted {len(deleted_document_ids)} documents from trash")
+
+        if settings.AUDIT_LOG_ENABLED:
+            # Delete the audit log entries for documents that dont exist anymore
+            LogEntry.objects.filter(
+                content_type=ContentType.objects.get_for_model(Document),
+                object_id__in=deleted_document_ids,
+            ).delete()
     except Exception as e:  # pragma: no cover
         logger.exception(f"Error while emptying trash: {e}")
     finally:
@@ -326,3 +382,86 @@ def empty_trash(doc_ids=None):
             cleanup_document_deletion,
             sender=Document,
         )
+
+
+@shared_task
+def check_scheduled_workflows():
+    scheduled_workflows: list[Workflow] = (
+        Workflow.objects.filter(
+            triggers__type=WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
+            enabled=True,
+        )
+        .distinct()
+        .prefetch_related("triggers")
+    )
+    if scheduled_workflows.count() > 0:
+        logger.debug(f"Checking {len(scheduled_workflows)} scheduled workflows")
+        for workflow in scheduled_workflows:
+            schedule_triggers = workflow.triggers.filter(
+                type=WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
+            )
+            trigger: WorkflowTrigger
+            for trigger in schedule_triggers:
+                documents = Document.objects.none()
+                offset_td = timedelta(days=trigger.schedule_offset_days)
+                logger.debug(
+                    f"Checking trigger {trigger} with offset {offset_td} against field: {trigger.schedule_date_field}",
+                )
+                match trigger.schedule_date_field:
+                    case WorkflowTrigger.ScheduleDateField.ADDED:
+                        documents = Document.objects.filter(
+                            added__lt=timezone.now() - offset_td,
+                        )
+                    case WorkflowTrigger.ScheduleDateField.CREATED:
+                        documents = Document.objects.filter(
+                            created__lt=timezone.now() - offset_td,
+                        )
+                    case WorkflowTrigger.ScheduleDateField.MODIFIED:
+                        documents = Document.objects.filter(
+                            modified__lt=timezone.now() - offset_td,
+                        )
+                    case WorkflowTrigger.ScheduleDateField.CUSTOM_FIELD:
+                        cf_instances = CustomFieldInstance.objects.filter(
+                            field=trigger.schedule_date_custom_field,
+                            value_date__lt=timezone.now() - offset_td,
+                        )
+                        documents = Document.objects.filter(
+                            id__in=cf_instances.values_list("document", flat=True),
+                        )
+                if documents.count() > 0:
+                    logger.debug(
+                        f"Found {documents.count()} documents for trigger {trigger}",
+                    )
+                    for document in documents:
+                        workflow_runs = WorkflowRun.objects.filter(
+                            document=document,
+                            type=WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
+                            workflow=workflow,
+                        ).order_by("-run_at")
+                        if not trigger.schedule_is_recurring and workflow_runs.exists():
+                            # schedule is non-recurring and the workflow has already been run
+                            logger.debug(
+                                f"Skipping document {document} for non-recurring workflow {workflow} as it has already been run",
+                            )
+                            continue
+                        elif (
+                            trigger.schedule_is_recurring
+                            and workflow_runs.exists()
+                            and (
+                                workflow_runs.last().run_at
+                                > timezone.now()
+                                - timedelta(
+                                    days=trigger.schedule_recurring_interval_days,
+                                )
+                            )
+                        ):
+                            # schedule is recurring but the last run was within the number of recurring interval days
+                            logger.debug(
+                                f"Skipping document {document} for recurring workflow {workflow} as the last run was within the recurring interval",
+                            )
+                            continue
+                        run_workflows(
+                            trigger_type=WorkflowTrigger.WorkflowTriggerType.SCHEDULED,
+                            workflow_to_run=workflow,
+                            document=document,
+                        )

@@ -17,6 +17,8 @@ export enum GlobalSearchType {
   TITLE_CONTENT = 'title-content',
 }
 
+export const PAPERLESS_GREEN_HEX = '#17541f'
+
 export const SETTINGS_KEYS = {
   LANGUAGE: 'language',
   APP_LOGO: 'app_logo',
@@ -31,6 +33,8 @@ export const SETTINGS_KEYS = {
   DARK_MODE_THUMB_INVERTED: 'general-settings:dark-mode:thumb-inverted',
   THEME_COLOR: 'general-settings:theme:color',
   USE_NATIVE_PDF_VIEWER: 'general-settings:document-details:native-pdf-viewer',
+  PDF_VIEWER_ZOOM_SETTING:
+    'general-settings:document-details:pdf-viewer-zoom-setting',
   DATE_LOCALE: 'general-settings:date-display:date-locale',
   DATE_FORMAT: 'general-settings:date-display:date-format',
   NOTIFICATIONS_CONSUMER_NEW_DOCUMENT:
@@ -61,9 +65,14 @@ export const SETTINGS_KEYS = {
   DEFAULT_PERMS_EDIT_GROUPS: 'general-settings:permissions:default-edit-groups',
   DOCUMENT_EDITING_REMOVE_INBOX_TAGS:
     'general-settings:document-editing:remove-inbox-tags',
+  DOCUMENT_EDITING_OVERLAY_THUMBNAIL:
+    'general-settings:document-editing:overlay-thumbnail',
   SEARCH_DB_ONLY: 'general-settings:search:db-only',
   SEARCH_FULL_TYPE: 'general-settings:search:more-link',
   EMPTY_TRASH_DELAY: 'trash_delay',
+  GMAIL_OAUTH_URL: 'gmail_oauth_url',
+  OUTLOOK_OAUTH_URL: 'outlook_oauth_url',
+  EMAIL_ENABLED: 'email_enabled',
 }
 
 export const SETTINGS: UiSetting[] = [
@@ -228,6 +237,11 @@ export const SETTINGS: UiSetting[] = [
     default: false,
   },
   {
+    key: SETTINGS_KEYS.DOCUMENT_EDITING_OVERLAY_THUMBNAIL,
+    type: 'boolean',
+    default: true,
+  },
+  {
     key: SETTINGS_KEYS.SEARCH_DB_ONLY,
     type: 'boolean',
     default: false,
@@ -241,5 +255,25 @@ export const SETTINGS: UiSetting[] = [
     key: SETTINGS_KEYS.EMPTY_TRASH_DELAY,
     type: 'number',
     default: 30,
+  },
+  {
+    key: SETTINGS_KEYS.GMAIL_OAUTH_URL,
+    type: 'string',
+    default: null,
+  },
+  {
+    key: SETTINGS_KEYS.OUTLOOK_OAUTH_URL,
+    type: 'string',
+    default: null,
+  },
+  {
+    key: SETTINGS_KEYS.EMAIL_ENABLED,
+    type: 'boolean',
+    default: false,
+  },
+  {
+    key: SETTINGS_KEYS.PDF_VIEWER_ZOOM_SETTING,
+    type: 'string',
+    default: 'page-width', // ZoomSetting from 'document-detail.component'
   },
 ]

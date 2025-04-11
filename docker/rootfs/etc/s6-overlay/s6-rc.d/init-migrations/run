@@ -1,0 +1,12 @@
+#!/command/with-contenv /usr/bin/bash
+# shellcheck shell=bash
+declare -r log_prefix="[init-migrations]"
+
+echo "${log_prefix} Apply database migrations..."
+
+# The whole migrate, with flock, needs to run as the right user
+if [[ -n "${USER_IS_NON_ROOT}" ]]; then
+	exec /etc/s6-overlay/s6-rc.d/init-migrations/migrate.sh
+else
+	exec s6-setuidgid paperless /etc/s6-overlay/s6-rc.d/init-migrations/migrate.sh
+fi

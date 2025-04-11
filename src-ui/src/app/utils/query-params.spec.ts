@@ -1,14 +1,22 @@
 import { convertToParamMap } from '@angular/router'
+import { CustomFieldQueryLogicalOperator } from '../data/custom-field-query'
 import { FilterRule } from '../data/filter-rule'
 import {
   FILTER_CORRESPONDENT,
+  FILTER_CUSTOM_FIELDS_QUERY,
   FILTER_HAS_ANY_TAG,
+  FILTER_HAS_CUSTOM_FIELDS_ALL,
+  FILTER_HAS_CUSTOM_FIELDS_ANY,
   FILTER_HAS_TAGS_ALL,
+  NEGATIVE_NULL_FILTER_VALUE,
 } from '../data/filter-rule-type'
-import { paramsToViewState } from './query-params'
-import { paramsFromViewState } from './query-params'
-import { queryParamsFromFilterRules } from './query-params'
-import { filterRulesFromQueryParams } from './query-params'
+import {
+  filterRulesFromQueryParams,
+  paramsFromViewState,
+  paramsToViewState,
+  queryParamsFromFilterRules,
+  transformLegacyFilterRules,
+} from './query-params'
 
 const tags__id__all = '9'
 const filterRules: FilterRule[] = [
@@ -88,6 +96,16 @@ describe('QueryParams Utils', () => {
     ])
     expect(params).toEqual({
       correspondent__isnull: 1,
+    })
+
+    params = queryParamsFromFilterRules([
+      {
+        rule_type: FILTER_CORRESPONDENT,
+        value: NEGATIVE_NULL_FILTER_VALUE.toString(),
+      },
+    ])
+    expect(params).toEqual({
+      correspondent__isnull: 0,
     })
 
     params = queryParamsFromFilterRules([
@@ -190,6 +208,60 @@ describe('QueryParams Utils', () => {
       {
         rule_type: FILTER_CORRESPONDENT,
         value: null,
+      },
+    ])
+  })
+
+  it('should transform legacy filter rules', () => {
+    let filterRules: FilterRule[] = [
+      {
+        rule_type: FILTER_HAS_CUSTOM_FIELDS_ANY,
+        value: '1',
+      },
+      {
+        rule_type: FILTER_HAS_CUSTOM_FIELDS_ANY,
+        value: '2',
+      },
+    ]
+
+    let transformedFilterRules = transformLegacyFilterRules(filterRules)
+
+    expect(transformedFilterRules).toEqual([
+      {
+        rule_type: FILTER_CUSTOM_FIELDS_QUERY,
+        value: JSON.stringify([
+          CustomFieldQueryLogicalOperator.Or,
+          [
+            [1, 'exists', true],
+            [2, 'exists', true],
+          ],
+        ]),
+      },
+    ])
+
+    filterRules = [
+      {
+        rule_type: FILTER_HAS_CUSTOM_FIELDS_ALL,
+        value: '3',
+      },
+      {
+        rule_type: FILTER_HAS_CUSTOM_FIELDS_ALL,
+        value: '4',
+      },
+    ]
+
+    transformedFilterRules = transformLegacyFilterRules(filterRules)
+
+    expect(transformedFilterRules).toEqual([
+      {
+        rule_type: FILTER_CUSTOM_FIELDS_QUERY,
+        value: JSON.stringify([
+          CustomFieldQueryLogicalOperator.And,
+          [
+            [3, 'exists', true],
+            [4, 'exists', true],
+          ],
+        ]),
       },
     ])
   })

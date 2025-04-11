@@ -1,41 +1,46 @@
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core'
-import { FormArray, FormControl, FormGroup } from '@angular/forms'
+import { AsyncPipe, NgTemplateOutlet } from '@angular/common'
+import { HttpClient, HttpResponse } from '@angular/common/http'
+import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core'
+import {
+  FormArray,
+  FormControl,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule,
+} from '@angular/forms'
 import { ActivatedRoute, Router } from '@angular/router'
 import {
   NgbDateStruct,
+  NgbDropdownModule,
   NgbModal,
   NgbNav,
   NgbNavChangeEvent,
+  NgbNavModule,
 } from '@ng-bootstrap/ng-bootstrap'
-import { Correspondent } from 'src/app/data/correspondent'
-import { Document } from 'src/app/data/document'
-import { DocumentMetadata } from 'src/app/data/document-metadata'
-import { DocumentType } from 'src/app/data/document-type'
-import { Tag } from 'src/app/data/tag'
-import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
-import { DocumentListViewService } from 'src/app/services/document-list-view.service'
-import { OpenDocumentsService } from 'src/app/services/open-documents.service'
-import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
-import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
-import { DocumentService } from 'src/app/services/rest/document.service'
-import { ConfirmDialogComponent } from '../common/confirm-dialog/confirm-dialog.component'
-import { CorrespondentEditDialogComponent } from '../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
-import { DocumentTypeEditDialogComponent } from '../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
-import { ToastService } from 'src/app/services/toast.service'
-import { TextComponent } from '../common/input/text/text.component'
-import { SettingsService } from 'src/app/services/settings.service'
 import { dirtyCheck, DirtyComponent } from '@ngneat/dirty-check-forms'
-import { Observable, Subject, BehaviorSubject } from 'rxjs'
+import { PDFDocumentProxy, PdfViewerModule } from 'ng2-pdf-viewer'
+import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
+import { DeviceDetectorService } from 'ngx-device-detector'
+import { BehaviorSubject, Observable, Subject } from 'rxjs'
 import {
-  first,
-  takeUntil,
-  switchMap,
-  map,
   debounceTime,
   distinctUntilChanged,
   filter,
+  first,
+  map,
+  switchMap,
+  takeUntil,
 } from 'rxjs/operators'
+import { Correspondent } from 'src/app/data/correspondent'
+import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
+import { CustomFieldInstance } from 'src/app/data/custom-field-instance'
+import { DataType } from 'src/app/data/datatype'
+import { Document } from 'src/app/data/document'
+import { DocumentMetadata } from 'src/app/data/document-metadata'
+import { DocumentNote } from 'src/app/data/document-note'
 import { DocumentSuggestions } from 'src/app/data/document-suggestions'
+import { DocumentType } from 'src/app/data/document-type'
+import { FilterRule } from 'src/app/data/filter-rule'
 import {
   FILTER_CORRESPONDENT,
   FILTER_CREATED_AFTER,
@@ -45,33 +50,61 @@ import {
   FILTER_HAS_TAGS_ALL,
   FILTER_STORAGE_PATH,
 } from 'src/app/data/filter-rule-type'
-import { StoragePathService } from 'src/app/services/rest/storage-path.service'
+import { ObjectWithId } from 'src/app/data/object-with-id'
 import { StoragePath } from 'src/app/data/storage-path'
-import { StoragePathEditDialogComponent } from '../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
+import { Tag } from 'src/app/data/tag'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
+import { User } from 'src/app/data/user'
+import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
+import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
+import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
+import { FileSizePipe } from 'src/app/pipes/file-size.pipe'
+import { SafeUrlPipe } from 'src/app/pipes/safeurl.pipe'
+import { ComponentRouterService } from 'src/app/services/component-router.service'
+import { DocumentListViewService } from 'src/app/services/document-list-view.service'
+import { HotKeyService } from 'src/app/services/hot-key.service'
+import { OpenDocumentsService } from 'src/app/services/open-documents.service'
 import {
   PermissionAction,
   PermissionsService,
   PermissionType,
 } from 'src/app/services/permissions.service'
-import { User } from 'src/app/data/user'
-import { UserService } from 'src/app/services/rest/user.service'
-import { DocumentNote } from 'src/app/data/document-note'
-import { HttpClient } from '@angular/common/http'
-import { ComponentWithPermissions } from '../with-permissions/with-permissions.component'
-import { EditDialogMode } from '../common/edit-dialog/edit-dialog.component'
-import { ObjectWithId } from 'src/app/data/object-with-id'
-import { FilterRule } from 'src/app/data/filter-rule'
-import { ISODateAdapter } from 'src/app/utils/ngb-iso-date-adapter'
-import { CustomField, CustomFieldDataType } from 'src/app/data/custom-field'
-import { CustomFieldInstance } from 'src/app/data/custom-field-instance'
+import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
 import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
-import { SplitConfirmDialogComponent } from '../common/confirm-dialog/split-confirm-dialog/split-confirm-dialog.component'
-import { RotateConfirmDialogComponent } from '../common/confirm-dialog/rotate-confirm-dialog/rotate-confirm-dialog.component'
+import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
+import { DocumentService } from 'src/app/services/rest/document.service'
+import { StoragePathService } from 'src/app/services/rest/storage-path.service'
+import { UserService } from 'src/app/services/rest/user.service'
+import { SettingsService } from 'src/app/services/settings.service'
+import { ToastService } from 'src/app/services/toast.service'
+import { ISODateAdapter } from 'src/app/utils/ngb-iso-date-adapter'
+import * as UTIF from 'utif'
+import { ConfirmDialogComponent } from '../common/confirm-dialog/confirm-dialog.component'
 import { DeletePagesConfirmDialogComponent } from '../common/confirm-dialog/delete-pages-confirm-dialog/delete-pages-confirm-dialog.component'
-import { HotKeyService } from 'src/app/services/hot-key.service'
-import { PDFDocumentProxy } from 'ng2-pdf-viewer'
-import { DataType } from 'src/app/data/datatype'
+import { RotateConfirmDialogComponent } from '../common/confirm-dialog/rotate-confirm-dialog/rotate-confirm-dialog.component'
+import { SplitConfirmDialogComponent } from '../common/confirm-dialog/split-confirm-dialog/split-confirm-dialog.component'
+import { CustomFieldsDropdownComponent } from '../common/custom-fields-dropdown/custom-fields-dropdown.component'
+import { CorrespondentEditDialogComponent } from '../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
+import { DocumentTypeEditDialogComponent } from '../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
+import { EditDialogMode } from '../common/edit-dialog/edit-dialog.component'
+import { StoragePathEditDialogComponent } from '../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
+import { EmailDocumentDialogComponent } from '../common/email-document-dialog/email-document-dialog.component'
+import { CheckComponent } from '../common/input/check/check.component'
+import { DateComponent } from '../common/input/date/date.component'
+import { DocumentLinkComponent } from '../common/input/document-link/document-link.component'
+import { MonetaryComponent } from '../common/input/monetary/monetary.component'
+import { NumberComponent } from '../common/input/number/number.component'
+import { PermissionsFormComponent } from '../common/input/permissions/permissions-form/permissions-form.component'
+import { SelectComponent } from '../common/input/select/select.component'
+import { TagsComponent } from '../common/input/tags/tags.component'
+import { TextComponent } from '../common/input/text/text.component'
+import { UrlComponent } from '../common/input/url/url.component'
+import { PageHeaderComponent } from '../common/page-header/page-header.component'
+import { ShareLinksDialogComponent } from '../common/share-links-dialog/share-links-dialog.component'
+import { DocumentHistoryComponent } from '../document-history/document-history.component'
+import { DocumentNotesComponent } from '../document-notes/document-notes.component'
+import { ComponentWithPermissions } from '../with-permissions/with-permissions.component'
+import { MetadataCollapseComponent } from './metadata-collapse/metadata-collapse.component'
 
 enum DocumentDetailNavIDs {
   Details = 1,
@@ -89,9 +122,10 @@ enum ContentRenderType {
   Text = 'text',
   Other = 'other',
   Unknown = 'unknown',
+  TIFF = 'tiff',
 }
 
-enum ZoomSetting {
+export enum ZoomSetting {
   PageFit = 'page-fit',
   PageWidth = 'page-width',
   Quarter = '.25',
@@ -107,6 +141,35 @@ enum ZoomSetting {
   selector: 'pngx-document-detail',
   templateUrl: './document-detail.component.html',
   styleUrls: ['./document-detail.component.scss'],
+  imports: [
+    PageHeaderComponent,
+    CustomFieldsDropdownComponent,
+    DocumentNotesComponent,
+    DocumentHistoryComponent,
+    CheckComponent,
+    DateComponent,
+    DocumentLinkComponent,
+    MetadataCollapseComponent,
+    PermissionsFormComponent,
+    SelectComponent,
+    TagsComponent,
+    TextComponent,
+    NumberComponent,
+    MonetaryComponent,
+    UrlComponent,
+    CustomDatePipe,
+    FileSizePipe,
+    IfPermissionsDirective,
+    AsyncPipe,
+    FormsModule,
+    ReactiveFormsModule,
+    NgTemplateOutlet,
+    SafeUrlPipe,
+    NgbNavModule,
+    NgbDropdownModule,
+    NgxBootstrapIconsModule,
+    PdfViewerModule,
+  ],
 })
 export class DocumentDetailComponent
   extends ComponentWithPermissions
@@ -131,9 +194,11 @@ export class DocumentDetailComponent
   title: string
   titleSubject: Subject<string> = new Subject()
   previewUrl: string
+  thumbUrl: string
   previewText: string
-  downloadUrl: string
-  downloadOriginalUrl: string
+  previewLoaded: boolean = false
+  tiffURL: string
+  tiffError: string
 
   correspondents: Correspondent[]
   documentTypes: DocumentType[]
@@ -168,6 +233,9 @@ export class DocumentDetailComponent
   ogDate: Date
 
   customFields: CustomField[]
+
+  public downloading: boolean = false
+
   public readonly CustomFieldDataType = CustomFieldDataType
 
   public readonly ContentRenderType = ContentRenderType
@@ -207,7 +275,9 @@ export class DocumentDetailComponent
     private userService: UserService,
     private customFieldsService: CustomFieldsService,
     private http: HttpClient,
-    private hotKeyService: HotKeyService
+    private hotKeyService: HotKeyService,
+    private componentRouterService: ComponentRouterService,
+    private deviceDetectorService: DeviceDetectorService
   ) {
     super()
   }
@@ -221,15 +291,17 @@ export class DocumentDetailComponent
   }
 
   get archiveContentRenderType(): ContentRenderType {
-    return this.getRenderType(
-      this.metadata?.has_archive_version
-        ? 'application/pdf'
-        : this.metadata?.original_mime_type
-    )
+    return this.document?.archived_file_name
+      ? this.getRenderType('application/pdf')
+      : this.getRenderType(this.document?.mime_type)
   }
 
   get originalContentRenderType(): ContentRenderType {
-    return this.getRenderType(this.metadata?.original_mime_type)
+    return this.getRenderType(this.document?.mime_type)
+  }
+
+  get showThumbnailOverlay(): boolean {
+    return this.settings.get(SETTINGS_KEYS.DOCUMENT_EDITING_OVERLAY_THUMBNAIL)
   }
 
   private getRenderType(mimeType: string): ContentRenderType {
@@ -240,6 +312,8 @@ export class DocumentDetailComponent
       ['text/plain', 'application/csv', 'text/csv'].includes(mimeType)
     ) {
       return ContentRenderType.Text
+    } else if (mimeType.indexOf('tiff') >= 0) {
+      return ContentRenderType.TIFF
     } else if (mimeType?.indexOf('image/') === 0) {
       return ContentRenderType.Image
     }
@@ -254,6 +328,7 @@ export class DocumentDetailComponent
   }
 
   ngOnInit(): void {
+    this.setZoom(this.settings.get(SETTINGS_KEYS.PDF_VIEWER_ZOOM_SETTING))
     this.documentForm.valueChanges
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(() => {
@@ -327,13 +402,8 @@ export class DocumentDetailComponent
         switchMap((paramMap) => {
           const documentId = +paramMap.get('id')
           this.docChangeNotifier.next(documentId)
-          return this.documentsService.get(documentId)
-        })
-      )
-      .pipe(
-        switchMap((doc) => {
-          this.documentId = doc.id
-          this.previewUrl = this.documentsService.getPreviewUrl(this.documentId)
+          // Dont wait to get the preview
+          this.previewUrl = this.documentsService.getPreviewUrl(documentId)
           this.http.get(this.previewUrl, { responseType: 'text' }).subscribe({
             next: (res) => {
               this.previewText = res.toString()
@@ -344,13 +414,13 @@ export class DocumentDetailComponent
               }`
             },
           })
-          this.downloadUrl = this.documentsService.getDownloadUrl(
-            this.documentId
-          )
-          this.downloadOriginalUrl = this.documentsService.getDownloadUrl(
-            this.documentId,
-            true
-          )
+          this.thumbUrl = this.documentsService.getThumbUrl(documentId)
+          return this.documentsService.get(documentId)
+        })
+      )
+      .pipe(
+        switchMap((doc) => {
+          this.documentId = doc.id
           this.suggestions = null
           const openDocument = this.openDocumentService.getOpenDocument(
             this.documentId
@@ -503,6 +573,16 @@ export class DocumentDetailComponent
       .subscribe(() => {
         if (this.openDocumentService.isDirty(this.document)) this.save()
       })
+
+    this.hotKeyService
+      .addShortcut({
+        keys: 'control.shift.s',
+        description: $localize`Save and close / next`,
+      })
+      .pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe(() => {
+        if (this.openDocumentService.isDirty(this.document)) this.saveEditNext()
+      })
   }
 
   ngOnDestroy(): void {
@@ -526,6 +606,9 @@ export class DocumentDetailComponent
     this.document = doc
     this.requiresPassword = false
     this.updateFormForCustomFields()
+    if (this.archiveContentRenderType === ContentRenderType.TIFF) {
+      this.tryRenderTiff()
+    }
     this.documentsService
       .getMetadata(doc.id)
       .pipe(
@@ -536,6 +619,12 @@ export class DocumentDetailComponent
       .subscribe({
         next: (result) => {
           this.metadata = result
+          if (
+            this.archiveContentRenderType !== ContentRenderType.PDF ||
+            this.useNativePdfViewer
+          ) {
+            this.previewLoaded = true
+          }
         },
         error: (error) => {
           this.metadata = {} // allow display to fallback to <object> tag
@@ -549,6 +638,10 @@ export class DocumentDetailComponent
       this.permissionsService.currentUserHasObjectPermissions(
         PermissionAction.Change,
         doc
+      ) &&
+      this.permissionsService.currentUserCan(
+        PermissionAction.Change,
+        PermissionType.Document
       )
     ) {
       this.documentsService
@@ -651,6 +744,31 @@ export class DocumentDetailComponent
       })
   }
 
+  createDisabled(dataType: DataType) {
+    switch (dataType) {
+      case DataType.Correspondent:
+        return !this.permissionsService.currentUserCan(
+          PermissionAction.Add,
+          PermissionType.Correspondent
+        )
+      case DataType.DocumentType:
+        return !this.permissionsService.currentUserCan(
+          PermissionAction.Add,
+          PermissionType.DocumentType
+        )
+      case DataType.StoragePath:
+        return !this.permissionsService.currentUserCan(
+          PermissionAction.Add,
+          PermissionType.StoragePath
+        )
+      case DataType.Tag:
+        return !this.permissionsService.currentUserCan(
+          PermissionAction.Add,
+          PermissionType.Tag
+        )
+    }
+  }
+
   discard() {
     this.documentsService
       .get(this.documentId)
@@ -677,6 +795,7 @@ export class DocumentDetailComponent
 
   save(close: boolean = false) {
     this.networkActive = true
+    ;(document.activeElement as HTMLElement)?.dispatchEvent(new Event('change'))
     this.documentsService
       .update(this.document)
       .pipe(first())
@@ -684,10 +803,15 @@ export class DocumentDetailComponent
         next: (docValues) => {
           // in case data changed while saving eg removing inbox_tags
           this.documentForm.patchValue(docValues)
-          this.store.next(this.documentForm.value)
+          const newValues = Object.assign({}, this.documentForm.value)
+          newValues.tags = [...docValues.tags]
+          newValues.custom_fields = [...docValues.custom_fields]
+          this.store.next(newValues)
           this.openDocumentService.setDirty(this.document, false)
           this.openDocumentService.save()
-          this.toastService.showInfo($localize`Document saved successfully.`)
+          this.toastService.showInfo(
+            $localize`Document "${newValues.title}" saved successfully.`
+          )
           this.networkActive = false
           this.error = null
           if (close) {
@@ -700,12 +824,24 @@ export class DocumentDetailComponent
         },
         error: (error) => {
           this.networkActive = false
-          if (!this.userCanEdit) {
-            this.toastService.showInfo($localize`Document saved successfully.`)
-            close && this.close()
+          const canEdit =
+            this.permissionsService.currentUserHasObjectPermissions(
+              PermissionAction.Change,
+              this.document
+            )
+          if (!canEdit) {
+            // document was 'given away'
+            this.openDocumentService.setDirty(this.document, false)
+            this.toastService.showInfo(
+              $localize`Document "${this.document.title}" saved successfully.`
+            )
+            this.close()
           } else {
             this.error = error.error
-            this.toastService.showError($localize`Error saving document`, error)
+            this.toastService.showError(
+              $localize`Error saving document "${this.document.title}"`,
+              error
+            )
           }
         },
       })
@@ -725,12 +861,14 @@ export class DocumentDetailComponent
       )
       .pipe(
         switchMap(({ nextDocId, updateResult }) => {
-          if (nextDocId && updateResult)
+          if (nextDocId && updateResult) {
+            this.openDocumentService.setDirty(this.document, false)
             return this.openDocumentService
               .closeDocument(this.document)
               .pipe(
                 map((closeResult) => ({ updateResult, nextDocId, closeResult }))
               )
+          }
         })
       )
       .pipe(first())
@@ -762,6 +900,10 @@ export class DocumentDetailComponent
           this.router.navigate([
             'view',
             this.documentListViewService.activeSavedViewId,
+          ])
+        } else if (this.componentRouterService.getComponentURLBefore()) {
+          this.router.navigate([
+            this.componentRouterService.getComponentURLBefore(),
           ])
         } else {
           this.router.navigate(['documents'])
@@ -828,7 +970,7 @@ export class DocumentDetailComponent
         .subscribe({
           next: () => {
             this.toastService.showInfo(
-              $localize`Reprocess operation will begin in the background. Close and re-open or reload this document after the operation has completed to see new content.`
+              $localize`Reprocess operation for "${this.document.title}" will begin in the background. Close and re-open or reload this document after the operation has completed to see new content.`
             )
             if (modal) {
               modal.close()
@@ -845,6 +987,56 @@ export class DocumentDetailComponent
           },
         })
     })
+  }
+
+  download(original: boolean = false) {
+    this.downloading = true
+    const downloadUrl = this.documentsService.getDownloadUrl(
+      this.documentId,
+      original
+    )
+    this.http
+      .get(downloadUrl, { observe: 'response', responseType: 'blob' })
+      .subscribe({
+        next: (response: HttpResponse<Blob>) => {
+          const filename = response.headers
+            .get('Content-Disposition')
+            ?.split(';')
+            ?.find((part) => part.trim().startsWith('filename='))
+            ?.split('=')[1]
+            ?.replace(/['"]/g, '')
+          const blob = new Blob([response.body], {
+            type: response.body.type,
+          })
+          this.downloading = false
+          const file = new File([blob], filename, {
+            type: response.body.type,
+          })
+          if (
+            !this.deviceDetectorService.isDesktop() &&
+            navigator.canShare &&
+            navigator.canShare({ files: [file] })
+          ) {
+            navigator.share({
+              files: [file],
+            })
+          } else {
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = filename
+            a.click()
+            URL.revokeObjectURL(url)
+          }
+        },
+        error: (error) => {
+          this.downloading = false
+          this.toastService.showError(
+            $localize`Error downloading document`,
+            error
+          )
+        },
+      })
   }
 
   hasNext() {
@@ -874,11 +1066,15 @@ export class DocumentDetailComponent
   pdfPreviewLoaded(pdf: PDFDocumentProxy) {
     this.previewNumPages = pdf.numPages
     if (this.password) this.requiresPassword = false
+    setTimeout(() => {
+      this.previewLoaded = true
+    }, 300)
   }
 
   onError(event) {
     if (event.name == 'PasswordException') {
       this.requiresPassword = true
+      this.previewLoaded = true
     }
   }
 
@@ -888,14 +1084,13 @@ export class DocumentDetailComponent
     }
   }
 
-  onZoomSelect(event: Event) {
-    const setting = (event.target as HTMLSelectElement)?.value as ZoomSetting
-    if (ZoomSetting.PageFit === setting) {
-      this.previewZoomSetting = ZoomSetting.One
+  setZoom(setting: ZoomSetting) {
+    if (ZoomSetting.PageFit === setting || ZoomSetting.PageWidth === setting) {
       this.previewZoomScale = setting
+      this.previewZoomSetting = ZoomSetting.One
     } else {
-      this.previewZoomScale = ZoomSetting.PageWidth
       this.previewZoomSetting = setting
+      this.previewZoomScale = ZoomSetting.PageWidth
     }
   }
 
@@ -903,6 +1098,14 @@ export class DocumentDetailComponent
     return Object.values(ZoomSetting).filter(
       (setting) => setting !== ZoomSetting.PageWidth
     )
+  }
+
+  isZoomSelected(setting: ZoomSetting): boolean {
+    if (this.previewZoomScale === ZoomSetting.PageFit) {
+      return setting === ZoomSetting.PageFit
+    }
+
+    return this.previewZoomSetting === setting
   }
 
   getZoomSettingTitle(setting: ZoomSetting): string {
@@ -994,10 +1197,21 @@ export class DocumentDetailComponent
     }
     return (
       !this.document ||
-      this.permissionsService.currentUserHasObjectPermissions(
+      (this.permissionsService.currentUserCan(
         PermissionAction.Change,
-        doc
-      )
+        PermissionType.Document
+      ) &&
+        this.permissionsService.currentUserHasObjectPermissions(
+          PermissionAction.Change,
+          doc
+        ))
+    )
+  }
+
+  get userCanAdd(): boolean {
+    return this.permissionsService.currentUserCan(
+      PermissionAction.Add,
+      PermissionType.Document
     )
   }
 
@@ -1076,9 +1290,7 @@ export class DocumentDetailComponent
     this.document.custom_fields?.forEach((fieldInstance) => {
       this.customFieldFormFields.push(
         new FormGroup({
-          field: new FormControl(
-            this.getCustomFieldFromInstance(fieldInstance)?.id
-          ),
+          field: new FormControl(fieldInstance.field),
           value: new FormControl(fieldInstance.value),
         }),
         { emitEvent }
@@ -1108,6 +1320,7 @@ export class DocumentDetailComponent
   splitDocument() {
     let modal = this.modalService.open(SplitConfirmDialogComponent, {
       backdrop: 'static',
+      size: 'lg',
     })
     modal.componentInstance.title = $localize`Split confirm`
     modal.componentInstance.messageBold = $localize`This operation will split the selected document(s) into new documents.`
@@ -1126,7 +1339,7 @@ export class DocumentDetailComponent
           .subscribe({
             next: () => {
               this.toastService.showInfo(
-                $localize`Split operation will begin in the background.`
+                $localize`Split operation for "${this.document.title}" will begin in the background.`
               )
               modal.close()
             },
@@ -1146,6 +1359,7 @@ export class DocumentDetailComponent
   rotateDocument() {
     let modal = this.modalService.open(RotateConfirmDialogComponent, {
       backdrop: 'static',
+      size: 'lg',
     })
     modal.componentInstance.title = $localize`Rotate confirm`
     modal.componentInstance.messageBold = $localize`This operation will permanently rotate the original version of the current document.`
@@ -1164,7 +1378,7 @@ export class DocumentDetailComponent
           .subscribe({
             next: () => {
               this.toastService.show({
-                content: $localize`Rotation will begin in the background. Close and re-open the document after the operation has completed to see the changes.`,
+                content: $localize`Rotation of "${this.document.title}" will begin in the background. Close and re-open the document after the operation has completed to see the changes.`,
                 delay: 8000,
                 action: this.close.bind(this),
                 actionName: $localize`Close`,
@@ -1204,7 +1418,7 @@ export class DocumentDetailComponent
           .subscribe({
             next: () => {
               this.toastService.showInfo(
-                $localize`Delete pages operation will begin in the background. Close and re-open or reload this document after the operation has completed to see the changes.`
+                $localize`Delete pages operation for "${this.document.title}" will begin in the background. Close and re-open or reload this document after the operation has completed to see the changes.`
               )
               modal.close()
             },
@@ -1219,5 +1433,66 @@ export class DocumentDetailComponent
             },
           })
       })
+  }
+
+  public openShareLinks() {
+    const modal = this.modalService.open(ShareLinksDialogComponent)
+    modal.componentInstance.documentId = this.document.id
+    modal.componentInstance.hasArchiveVersion =
+      !!this.document?.archived_file_name
+  }
+
+  get emailEnabled(): boolean {
+    return this.settings.get(SETTINGS_KEYS.EMAIL_ENABLED)
+  }
+
+  public openEmailDocument() {
+    const modal = this.modalService.open(EmailDocumentDialogComponent, {
+      backdrop: 'static',
+    })
+    modal.componentInstance.documentId = this.document.id
+    modal.componentInstance.hasArchiveVersion =
+      !!this.document?.archived_file_name
+  }
+
+  private tryRenderTiff() {
+    this.http.get(this.previewUrl, { responseType: 'arraybuffer' }).subscribe({
+      next: (res) => {
+        /* istanbul ignore next */
+        try {
+          // See UTIF.js > _imgLoaded
+          const tiffIfds: any[] = UTIF.decode(res)
+          var vsns = tiffIfds,
+            ma = 0,
+            page = vsns[0]
+          if (tiffIfds[0].subIFD) vsns = vsns.concat(tiffIfds[0].subIFD)
+          for (var i = 0; i < vsns.length; i++) {
+            var img = vsns[i]
+            if (img['t258'] == null || img['t258'].length < 3) continue
+            var ar = img['t256'] * img['t257']
+            if (ar > ma) {
+              ma = ar
+              page = img
+            }
+          }
+          UTIF.decodeImage(res, page, tiffIfds)
+          const rgba = UTIF.toRGBA8(page)
+          const { width: w, height: h } = page
+          var cnv = document.createElement('canvas')
+          cnv.width = w
+          cnv.height = h
+          var ctx = cnv.getContext('2d'),
+            imgd = ctx.createImageData(w, h)
+          for (var i = 0; i < rgba.length; i++) imgd.data[i] = rgba[i]
+          ctx.putImageData(imgd, 0, 0)
+          this.tiffURL = cnv.toDataURL()
+        } catch (err) {
+          this.tiffError = $localize`An error occurred loading tiff: ${err.toString()}`
+        }
+      },
+      error: (err) => {
+        this.tiffError = $localize`An error occurred loading tiff: ${err.toString()}`
+      },
+    })
   }
 }

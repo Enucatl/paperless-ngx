@@ -1,70 +1,81 @@
 import { Component, Input, OnDestroy, OnInit } from '@angular/core'
-import { Tag } from 'src/app/data/tag'
-import { Correspondent } from 'src/app/data/correspondent'
-import { DocumentType } from 'src/app/data/document-type'
-import { TagService } from 'src/app/services/rest/tag.service'
-import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
-import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
-import { DocumentListViewService } from 'src/app/services/document-list-view.service'
-import { NgbModal, NgbModalRef } from '@ng-bootstrap/ng-bootstrap'
 import {
-  DocumentService,
-  SelectionDataItem,
-} from 'src/app/services/rest/document.service'
-import { OpenDocumentsService } from 'src/app/services/open-documents.service'
-import { ConfirmDialogComponent } from 'src/app/components/common/confirm-dialog/confirm-dialog.component'
+  FormControl,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule,
+} from '@angular/forms'
 import {
-  ChangedItems,
-  FilterableDropdownSelectionModel,
-} from '../../common/filterable-dropdown/filterable-dropdown.component'
-import { ToggleableItemState } from '../../common/filterable-dropdown/toggleable-dropdown-button/toggleable-dropdown-button.component'
-import { MatchingModel } from 'src/app/data/matching-model'
-import { SettingsService } from 'src/app/services/settings.service'
-import { ToastService } from 'src/app/services/toast.service'
+  NgbDropdownModule,
+  NgbModal,
+  NgbModalRef,
+} from '@ng-bootstrap/ng-bootstrap'
 import { saveAs } from 'file-saver'
-import { StoragePathService } from 'src/app/services/rest/storage-path.service'
-import { StoragePath } from 'src/app/data/storage-path'
+import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
+import { first, map, Subject, switchMap, takeUntil } from 'rxjs'
+import { ConfirmDialogComponent } from 'src/app/components/common/confirm-dialog/confirm-dialog.component'
+import { CustomField } from 'src/app/data/custom-field'
+import { MatchingModel } from 'src/app/data/matching-model'
 import { SETTINGS_KEYS } from 'src/app/data/ui-settings'
-import { ComponentWithPermissions } from '../../with-permissions/with-permissions.component'
-import { PermissionsDialogComponent } from '../../common/permissions-dialog/permissions-dialog.component'
+import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
+import { DocumentListViewService } from 'src/app/services/document-list-view.service'
+import { OpenDocumentsService } from 'src/app/services/open-documents.service'
 import {
   PermissionAction,
   PermissionsService,
   PermissionType,
 } from 'src/app/services/permissions.service'
-import { FormControl, FormGroup } from '@angular/forms'
-import { first, map, Subject, switchMap, takeUntil } from 'rxjs'
-import { CorrespondentEditDialogComponent } from '../../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
-import { EditDialogMode } from '../../common/edit-dialog/edit-dialog.component'
-import { TagEditDialogComponent } from '../../common/edit-dialog/tag-edit-dialog/tag-edit-dialog.component'
-import { DocumentTypeEditDialogComponent } from '../../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
-import { StoragePathEditDialogComponent } from '../../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
-import { RotateConfirmDialogComponent } from '../../common/confirm-dialog/rotate-confirm-dialog/rotate-confirm-dialog.component'
-import { MergeConfirmDialogComponent } from '../../common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component'
-import { CustomField } from 'src/app/data/custom-field'
+import { CorrespondentService } from 'src/app/services/rest/correspondent.service'
 import { CustomFieldsService } from 'src/app/services/rest/custom-fields.service'
+import { DocumentTypeService } from 'src/app/services/rest/document-type.service'
+import {
+  DocumentService,
+  SelectionDataItem,
+} from 'src/app/services/rest/document.service'
+import { StoragePathService } from 'src/app/services/rest/storage-path.service'
+import { TagService } from 'src/app/services/rest/tag.service'
+import { SettingsService } from 'src/app/services/settings.service'
+import { ToastService } from 'src/app/services/toast.service'
+import { MergeConfirmDialogComponent } from '../../common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component'
+import { RotateConfirmDialogComponent } from '../../common/confirm-dialog/rotate-confirm-dialog/rotate-confirm-dialog.component'
+import { CorrespondentEditDialogComponent } from '../../common/edit-dialog/correspondent-edit-dialog/correspondent-edit-dialog.component'
 import { CustomFieldEditDialogComponent } from '../../common/edit-dialog/custom-field-edit-dialog/custom-field-edit-dialog.component'
+import { DocumentTypeEditDialogComponent } from '../../common/edit-dialog/document-type-edit-dialog/document-type-edit-dialog.component'
+import { EditDialogMode } from '../../common/edit-dialog/edit-dialog.component'
+import { StoragePathEditDialogComponent } from '../../common/edit-dialog/storage-path-edit-dialog/storage-path-edit-dialog.component'
+import { TagEditDialogComponent } from '../../common/edit-dialog/tag-edit-dialog/tag-edit-dialog.component'
+import {
+  ChangedItems,
+  FilterableDropdownComponent,
+  FilterableDropdownSelectionModel,
+} from '../../common/filterable-dropdown/filterable-dropdown.component'
+import { ToggleableItemState } from '../../common/filterable-dropdown/toggleable-dropdown-button/toggleable-dropdown-button.component'
+import { PermissionsDialogComponent } from '../../common/permissions-dialog/permissions-dialog.component'
+import { ComponentWithPermissions } from '../../with-permissions/with-permissions.component'
+import { CustomFieldsBulkEditDialogComponent } from './custom-fields-bulk-edit-dialog/custom-fields-bulk-edit-dialog.component'
 
 @Component({
   selector: 'pngx-bulk-editor',
   templateUrl: './bulk-editor.component.html',
   styleUrls: ['./bulk-editor.component.scss'],
+  imports: [
+    FilterableDropdownComponent,
+    IfPermissionsDirective,
+    FormsModule,
+    ReactiveFormsModule,
+    NgbDropdownModule,
+    NgxBootstrapIconsModule,
+  ],
 })
 export class BulkEditorComponent
   extends ComponentWithPermissions
   implements OnInit, OnDestroy
 {
-  tags: Tag[]
-  correspondents: Correspondent[]
-  documentTypes: DocumentType[]
-  storagePaths: StoragePath[]
-  customFields: CustomField[]
-
-  tagSelectionModel = new FilterableDropdownSelectionModel()
+  tagSelectionModel = new FilterableDropdownSelectionModel(true)
   correspondentSelectionModel = new FilterableDropdownSelectionModel()
   documentTypeSelectionModel = new FilterableDropdownSelectionModel()
   storagePathsSelectionModel = new FilterableDropdownSelectionModel()
-  customFieldsSelectionModel = new FilterableDropdownSelectionModel()
+  customFieldsSelectionModel = new FilterableDropdownSelectionModel(true)
   tagDocumentCounts: SelectionDataItem[]
   correspondentDocumentCounts: SelectionDataItem[]
   documentTypeDocumentCounts: SelectionDataItem[]
@@ -131,6 +142,20 @@ export class BulkEditorComponent
     return ownsAll
   }
 
+  get userCanEdit(): boolean {
+    return this.permissionService.currentUserCan(
+      PermissionAction.Change,
+      PermissionType.Document
+    )
+  }
+
+  get userCanAdd(): boolean {
+    return this.permissionService.currentUserCan(
+      PermissionAction.Add,
+      PermissionType.Document
+    )
+  }
+
   ngOnInit() {
     if (
       this.permissionService.currentUserCan(
@@ -141,7 +166,7 @@ export class BulkEditorComponent
       this.tagService
         .listAll()
         .pipe(first())
-        .subscribe((result) => (this.tags = result.results))
+        .subscribe((result) => (this.tagSelectionModel.items = result.results))
     }
     if (
       this.permissionService.currentUserCan(
@@ -152,7 +177,9 @@ export class BulkEditorComponent
       this.correspondentService
         .listAll()
         .pipe(first())
-        .subscribe((result) => (this.correspondents = result.results))
+        .subscribe(
+          (result) => (this.correspondentSelectionModel.items = result.results)
+        )
     }
     if (
       this.permissionService.currentUserCan(
@@ -163,7 +190,9 @@ export class BulkEditorComponent
       this.documentTypeService
         .listAll()
         .pipe(first())
-        .subscribe((result) => (this.documentTypes = result.results))
+        .subscribe(
+          (result) => (this.documentTypeSelectionModel.items = result.results)
+        )
     }
     if (
       this.permissionService.currentUserCan(
@@ -174,7 +203,9 @@ export class BulkEditorComponent
       this.storagePathService
         .listAll()
         .pipe(first())
-        .subscribe((result) => (this.storagePaths = result.results))
+        .subscribe(
+          (result) => (this.storagePathsSelectionModel.items = result.results)
+        )
     }
     if (
       this.permissionService.currentUserCan(
@@ -185,7 +216,9 @@ export class BulkEditorComponent
       this.customFieldService
         .listAll()
         .pipe(first())
-        .subscribe((result) => (this.customFields = result.results))
+        .subscribe(
+          (result) => (this.customFieldsSelectionModel.items = result.results)
+        )
     }
 
     this.downloadForm
@@ -233,6 +266,9 @@ export class BulkEditorComponent
       .pipe(first())
       .subscribe({
         next: () => {
+          if (args['delete_originals']) {
+            this.list.selected.clear()
+          }
           this.list.reload()
           this.list.reduceSelectionToFilter()
           this.list.selected.forEach((id) => {
@@ -613,7 +649,7 @@ export class BulkEditorComponent
       )
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(({ newTag, tags }) => {
-        this.tags = tags.results
+        this.tagSelectionModel.items = tags.results
         this.tagSelectionModel.toggle(newTag.id)
       })
   }
@@ -636,7 +672,7 @@ export class BulkEditorComponent
       )
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(({ newCorrespondent, correspondents }) => {
-        this.correspondents = correspondents.results
+        this.correspondentSelectionModel.items = correspondents.results
         this.correspondentSelectionModel.toggle(newCorrespondent.id)
       })
   }
@@ -657,7 +693,7 @@ export class BulkEditorComponent
       )
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(({ newDocumentType, documentTypes }) => {
-        this.documentTypes = documentTypes.results
+        this.documentTypeSelectionModel.items = documentTypes.results
         this.documentTypeSelectionModel.toggle(newDocumentType.id)
       })
   }
@@ -678,7 +714,7 @@ export class BulkEditorComponent
       )
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(({ newStoragePath, storagePaths }) => {
-        this.storagePaths = storagePaths.results
+        this.storagePathsSelectionModel.items = storagePaths.results
         this.storagePathsSelectionModel.toggle(newStoragePath.id)
       })
   }
@@ -699,7 +735,7 @@ export class BulkEditorComponent
       )
       .pipe(takeUntil(this.unsubscribeNotifier))
       .subscribe(({ newCustomField, customFields }) => {
-        this.customFields = customFields.results
+        this.customFieldsSelectionModel.items = customFields.results
         this.customFieldsSelectionModel.toggle(newCustomField.id)
       })
   }
@@ -782,11 +818,11 @@ export class BulkEditorComponent
   rotateSelected() {
     let modal = this.modalService.open(RotateConfirmDialogComponent, {
       backdrop: 'static',
+      size: 'lg',
     })
     const rotateDialog = modal.componentInstance as RotateConfirmDialogComponent
     rotateDialog.title = $localize`Rotate confirm`
     rotateDialog.messageBold = $localize`This operation will permanently rotate the original version of ${this.list.selected.size} document(s).`
-    rotateDialog.message = $localize`This will alter the original copy.`
     rotateDialog.btnClass = 'btn-danger'
     rotateDialog.btnCaption = $localize`Proceed`
     rotateDialog.documentID = Array.from(this.list.selected)[0]
@@ -819,11 +855,48 @@ export class BulkEditorComponent
         if (mergeDialog.deleteOriginals) {
           args['delete_originals'] = true
         }
+        if (mergeDialog.archiveFallback) {
+          args['archive_fallback'] = true
+        }
         mergeDialog.buttonsEnabled = false
         this.executeBulkOperation(modal, 'merge', args, mergeDialog.documentIDs)
         this.toastService.showInfo(
           $localize`Merged document will be queued for consumption.`
         )
       })
+  }
+
+  public setCustomFieldValues(changedCustomFields: ChangedItems) {
+    const modal = this.modalService.open(CustomFieldsBulkEditDialogComponent, {
+      backdrop: 'static',
+      size: 'lg',
+    })
+    const dialog =
+      modal.componentInstance as CustomFieldsBulkEditDialogComponent
+    dialog.customFields = (
+      this.customFieldsSelectionModel.items as CustomField[]
+    ).filter((f) => f.id !== null)
+    dialog.fieldsToAddIds = changedCustomFields.itemsToAdd.map(
+      (item) => item.id
+    )
+    dialog.fieldsToRemoveIds = changedCustomFields.itemsToRemove.map(
+      (item) => item.id
+    )
+
+    dialog.documents = Array.from(this.list.selected)
+    dialog.succeeded.subscribe((result) => {
+      this.toastService.showInfo($localize`Custom fields updated.`)
+      this.list.reload()
+      this.list.reduceSelectionToFilter()
+      this.list.selected.forEach((id) => {
+        this.openDocumentService.refreshDocument(id)
+      })
+    })
+    dialog.failed.subscribe((error) => {
+      this.toastService.showError(
+        $localize`Error updating custom fields.`,
+        error
+      )
+    })
   }
 }

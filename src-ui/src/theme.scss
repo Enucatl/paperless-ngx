@@ -1,7 +1,4 @@
-$color-mode-type: data;
-
-@import 'bootstrap/scss/mixins/color-mode';
-
+@use "sass:color";
 @mixin paperless-green {
   // base color e.g. #17541f = hsl(128, 57%, 21%)
   --pngx-primary: 128, 57%;
@@ -24,14 +21,21 @@ $color-mode-type: data;
   --pngx-success-darken-10: hsl(152, 69%, 11%); // based on success #198754
   --pngx-bg-alt: #fff;
   --pngx-bg-darker: var(--bs-gray-100);
-  --pngx-bg-alt2: var(--bs-gray-200);
+  --pngx-bg-alt2: var(--bs-gray-200); // #e9ecef
+  --pngx-bg-disabled: #f7f7f7;
   --pngx-focus-alpha: 0.3;
+  --pngx-toast-max-width: 340px;
+  --bs-info: var(--pngx-bg-alt2);
+  --bs-info-rgb: 233, 236, 239;
+  @media screen and (min-width: 1024px) {
+    --pngx-toast-max-width: 450px;
+  }
 }
 
 // Dark text colors allow for maintain contrast with theme color changes
 $text-color-light-bg: #212529;
 $text-color-dark-bg: #abb2bf;
-$text-color-dark-bg-accent: lighten($text-color-dark-bg, 10%);
+$text-color-dark-bg-accent: color.adjust($text-color-dark-bg, $lightness: 10%);
 // Taken from bootstrap
 $form-check-input-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path fill='none' stroke='#{$text-color-light-bg}' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M6 10l3 3l6-6'/></svg>");
 $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'><circle r='2' fill='#{$text-color-light-bg}'/></svg>");
@@ -69,8 +73,15 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
 }
 
 @mixin dark-mode {
-  --bs-body-color: #{$text-color-dark-bg};
   --pngx-body-color-accent: #{$text-color-dark-bg-accent};
+  --pngx-bg-alt: #242529;
+  --pngx-bg-alt2: #232323;
+  --pngx-bg-darker: #101216;
+  --pngx-bg-disabled: var(--pngx-bg-alt);
+  --pngx-focus-alpha: 0.6;
+  --pngx-primary-faded: var(--pngx-primary-darken-15);
+  --pngx-primary-text-contrast: var(--bs-body-color);
+  --bs-body-color: #{$text-color-dark-bg};
   --bs-secondary-color: #6c757d;
   --bs-danger: #b71631;
   --bs-danger-rgb: 183, 22, 49;
@@ -78,14 +89,10 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
   --bs-body-bg-rgb: 22, 22, 24;
   --bs-light: #1c1c1f;
   --bs-light-rgb: 28, 28, 31;
+  --bs-info: var(--pngx-bg-alt);
+  --bs-info-rgb: 36, 36, 39;
   --bs-border-color: #47494f;
-  --pngx-bg-alt2: #232323;
-  --pngx-bg-darker: #101216;
   --bs-tertiary-bg: var(--pngx-bg-darker);
-  --pngx-bg-alt: #242529;
-  --pngx-focus-alpha: 0.6;
-  --pngx-primary-faded: var(--pngx-primary-darken-15);
-  --pngx-primary-text-contrast: var(--bs-body-color);
   --bs-dark-border-subtle: var(--pngx-bg-darker);
   --bs-border-color-translucent: rgba(0, 0, 0, .175); // override bs
 
@@ -130,7 +137,7 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
   .btn-outline-secondary {
     &:hover, &:focus, &.active, &:active {
       background-color: var(--pngx-bg-darker);
-      color: var(--bs-primary);
+      color: var(--pngx-body-color-accent) !important;
     }
   }
 
@@ -143,8 +150,8 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
   }
 
   .search-container {
-    input, input:focus {
-      color: var(--bs-body-color) !important;
+    input, input:focus, i-bs[name="search"] , ::placeholder {
+      color: var(--pngx-primary-text-contrast) !important;
     }
   }
 
@@ -183,10 +190,11 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
   }
 
   .doc-img {
-    mix-blend-mode: normal !important;
+    mix-blend-mode: normal;
     border-radius: 0;
     border-color: var(--bs-border-color);
     filter: invert(10%);
+    transform: translateZ(0); // fix for safari to force hw acceleration
 
     &.border-end {
       border-right: none !important;
@@ -230,6 +238,12 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
     &.table-hover > tbody > tr:hover > * {
       background-color: var(--bs-light);
       color: var(--pngx-body-color-accent);
+    }
+  }
+
+  .table-row-selected {
+    td, a:not(.badge) {
+      color: var(--pngx-primary-text-contrast) !important;
     }
   }
 
@@ -277,10 +291,6 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
     color: var(--pngx-primary-text-contrast);
   }
 
-  .toast .btn-outline-dark:hover {
-    color: var(--bs-body-color)
-  }
-
   .dropdown-item {
     --bs-dropdown-color: var(--bs-body-color);
     --pngx-bg-darker: var(--pngx-bg-alt);
@@ -303,7 +313,7 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
   }
 }
 
-@include color-mode(dark) {
+[data-bs-theme="dark"] {
   body:not(.primary-light):not(.primary-dark) {
     @include paperless-green-dark-mode;
 
@@ -317,7 +327,7 @@ $form-check-radio-checked-bg-image-dark: url("data:image/svg+xml,<svg xmlns='htt
 }
 
 // Temp to not blink with white before angular loads
-@include color-mode(auto) {
+[data-bs-theme="auto"] {
   @media (prefers-color-scheme: dark) {
     body {
       // no custom theme color

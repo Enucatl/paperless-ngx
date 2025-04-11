@@ -15,6 +15,11 @@ class MailAccount(document_models.ModelWithOwner):
         SSL = 2, _("Use SSL")
         STARTTLS = 3, _("Use STARTTLS")
 
+    class MailAccountType(models.IntegerChoices):
+        IMAP = 1, _("IMAP")
+        GMAIL_OAUTH = 2, _("Gmail OAuth")
+        OUTLOOK_OAUTH = 3, _("Outlook OAuth")
+
     name = models.CharField(_("name"), max_length=256, unique=True)
 
     imap_server = models.CharField(_("IMAP server"), max_length=256)
@@ -37,7 +42,7 @@ class MailAccount(document_models.ModelWithOwner):
 
     username = models.CharField(_("username"), max_length=256)
 
-    password = models.CharField(_("password"), max_length=2048)
+    password = models.TextField(_("password"))
 
     is_token = models.BooleanField(_("Is token authentication"), default=False)
 
@@ -48,6 +53,30 @@ class MailAccount(document_models.ModelWithOwner):
         help_text=_(
             "The character set to use when communicating with the "
             "mail server, such as 'UTF-8' or 'US-ASCII'.",
+        ),
+    )
+
+    account_type = models.PositiveIntegerField(
+        _("account type"),
+        choices=MailAccountType.choices,
+        default=MailAccountType.IMAP,
+    )
+
+    refresh_token = models.TextField(
+        _("refresh token"),
+        blank=True,
+        null=True,
+        help_text=_(
+            "The refresh token to use for token authentication e.g. with oauth2.",
+        ),
+    )
+
+    expiration = models.DateTimeField(
+        _("expiration"),
+        blank=True,
+        null=True,
+        help_text=_(
+            "The expiration date of the refresh token. ",
         ),
     )
 
@@ -86,6 +115,13 @@ class MailRule(document_models.ModelWithOwner):
         ATTACHMENTS_ONLY = 1, _("Only process attachments.")
         EVERYTHING = 2, _("Process all files, including 'inline' attachments.")
 
+    class PdfLayout(models.IntegerChoices):
+        DEFAULT = 0, _("System default")
+        TEXT_HTML = 1, _("Text, then HTML")
+        HTML_TEXT = 2, _("HTML, then text")
+        HTML_ONLY = 3, _("HTML only")
+        TEXT_ONLY = 4, _("Text only")
+
     class MailAction(models.IntegerChoices):
         DELETE = 1, _("Delete")
         MOVE = 2, _("Move to specified folder")
@@ -114,6 +150,8 @@ class MailRule(document_models.ModelWithOwner):
         on_delete=models.CASCADE,
         verbose_name=_("account"),
     )
+
+    enabled = models.BooleanField(_("enabled"), default=True)
 
     folder = models.CharField(
         _("folder"),
@@ -197,6 +235,12 @@ class MailRule(document_models.ModelWithOwner):
         _("consumption scope"),
         choices=ConsumptionScope.choices,
         default=ConsumptionScope.ATTACHMENTS_ONLY,
+    )
+
+    pdf_layout = models.PositiveIntegerField(
+        _("pdf layout"),
+        choices=PdfLayout.choices,
+        default=PdfLayout.DEFAULT,
     )
 
     action = models.PositiveIntegerField(

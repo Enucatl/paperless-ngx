@@ -1,9 +1,6 @@
 .date-dropdown {
+  --bs-dropdown-min-width: 22rem;
   white-space: nowrap;
-
-  @media(min-width: 768px) {
-    --bs-dropdown-min-width: 40rem;
-  }
 
   .btn-link {
     line-height: 1;
@@ -13,4 +10,35 @@
 .selected-icon {
   min-width: 1em;
   min-height: 1em;
+}
+
+.select-item .selected-icon {
+  line-height: 2em;
+}
+
+.input-group-sm {
+  .form-control {
+    font-size: 0.875rem;
+  }
+}
+
+.focus-variants {
+  .variant-focused {
+    display: none;
+  }
+
+  &:hover, &:focus {
+    .variant-unfocused {
+      display: none;
+    }
+    .variant-focused {
+      display: block;
+    }
+  }
+}
+
+.btn-group-xs {
+  > .btn {
+    border-radius: 0.15rem;
+  }
 }

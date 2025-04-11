@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http'
 import {
   Directive,
   OnDestroy,
@@ -7,14 +8,19 @@ import {
 } from '@angular/core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { Subject } from 'rxjs'
-import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators'
 import {
-  MatchingModel,
-  MATCHING_ALGORITHMS,
+  debounceTime,
+  delay,
+  distinctUntilChanged,
+  takeUntil,
+  tap,
+} from 'rxjs/operators'
+import {
   MATCH_AUTO,
   MATCH_NONE,
+  MATCHING_ALGORITHMS,
+  MatchingModel,
 } from 'src/app/data/matching-model'
-import { ObjectWithId } from 'src/app/data/object-with-id'
 import { ObjectWithPermissions } from 'src/app/data/object-with-permissions'
 import {
   SortableDirective,
@@ -33,8 +39,8 @@ import {
 import { ToastService } from 'src/app/services/toast.service'
 import { ConfirmDialogComponent } from '../../common/confirm-dialog/confirm-dialog.component'
 import { EditDialogMode } from '../../common/edit-dialog/edit-dialog.component'
-import { ComponentWithPermissions } from '../../with-permissions/with-permissions.component'
 import { PermissionsDialogComponent } from '../../common/permissions-dialog/permissions-dialog.component'
+import { LoadingComponentWithPermissions } from '../../loading-component/loading.component'
 
 export interface ManagementListColumn {
   key: string
@@ -44,11 +50,13 @@ export interface ManagementListColumn {
   valueFn: any
 
   rendersHtml?: boolean
+
+  hideOnMobile?: boolean
 }
 
 @Directive()
-export abstract class ManagementListComponent<T extends ObjectWithId>
-  extends ComponentWithPermissions
+export abstract class ManagementListComponent<T extends MatchingModel>
+  extends LoadingComponentWithPermissions
   implements OnInit, OnDestroy
 {
   constructor(
@@ -78,8 +86,6 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
   public sortField: string
   public sortReverse: boolean
 
-  public isLoading: boolean = false
-
   private nameFilterDebounce: Subject<string>
   protected unsubscribeNotifier: Subject<any> = new Subject()
   protected _nameFilter: string
@@ -105,11 +111,6 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
       })
   }
 
-  ngOnDestroy() {
-    this.unsubscribeNotifier.next(true)
-    this.unsubscribeNotifier.complete()
-  }
-
   getMatching(o: MatchingModel) {
     if (o.matching_algorithm == MATCH_AUTO) {
       return $localize`Automatic`
@@ -130,8 +131,9 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
     this.reloadData()
   }
 
-  reloadData() {
-    this.isLoading = true
+  reloadData(extraParams: { [key: string]: any } = null) {
+    this.loading = true
+    this.clearSelection()
     this.service
       .listFiltered(
         this.page,
@@ -139,13 +141,28 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
         this.sortField,
         this.sortReverse,
         this._nameFilter,
-        true
+        true,
+        extraParams
       )
-      .pipe(takeUntil(this.unsubscribeNotifier))
-      .subscribe((c) => {
-        this.data = c.results
-        this.collectionSize = c.count
-        this.isLoading = false
+      .pipe(
+        takeUntil(this.unsubscribeNotifier),
+        tap((c) => {
+          this.data = c.results
+          this.collectionSize = c.count
+        }),
+        delay(100)
+      )
+      .subscribe({
+        error: (error: HttpErrorResponse) => {
+          if (error.error?.detail?.includes('Invalid page')) {
+            this.page = 1
+            this.reloadData()
+          }
+        },
+        next: () => {
+          this.show = true
+          this.loading = false
+        },
       })
   }
 
@@ -177,7 +194,7 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
     activeModal.componentInstance.succeeded.subscribe(() => {
       this.reloadData()
       this.toastService.showInfo(
-        $localize`Successfully updated ${this.typeName}.`
+        $localize`Successfully updated ${this.typeName} "${object.name}".`
       )
     })
     activeModal.componentInstance.failed.subscribe((e) => {
@@ -190,7 +207,7 @@ export abstract class ManagementListComponent<T extends ObjectWithId>
 
   abstract getDeleteMessage(object: T)
 
-  filterDocuments(object: ObjectWithId) {
+  filterDocuments(object: MatchingModel) {
     this.documentListViewService.quickFilter([
       { rule_type: this.filterRuleType, value: object.id.toString() },
     ])

@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import logging
 import re
 from fnmatch import fnmatch
-from typing import Union
+from typing import TYPE_CHECKING
 
-from documents.classifier import DocumentClassifier
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentSource
 from documents.models import Correspondent
@@ -16,11 +17,14 @@ from documents.models import Workflow
 from documents.models import WorkflowTrigger
 from documents.permissions import get_objects_for_user_owner_aware
 
+if TYPE_CHECKING:
+    from documents.classifier import DocumentClassifier
+
 logger = logging.getLogger("paperless.matching")
 
 
 def log_reason(
-    matching_model: Union[MatchingModel, WorkflowTrigger],
+    matching_model: MatchingModel | WorkflowTrigger,
     document: Document,
     reason: str,
 ):
@@ -386,7 +390,7 @@ def existing_document_matches_workflow(
 
 
 def document_matches_workflow(
-    document: Union[ConsumableDocument, Document],
+    document: ConsumableDocument | Document,
     workflow: Workflow,
     trigger_type: WorkflowTrigger.WorkflowTriggerType,
 ) -> bool:
@@ -410,6 +414,7 @@ def document_matches_workflow(
             elif (
                 trigger_type == WorkflowTrigger.WorkflowTriggerType.DOCUMENT_ADDED
                 or trigger_type == WorkflowTrigger.WorkflowTriggerType.DOCUMENT_UPDATED
+                or trigger_type == WorkflowTrigger.WorkflowTriggerType.SCHEDULED
             ):
                 trigger_matched, reason = existing_document_matches_workflow(
                     document,

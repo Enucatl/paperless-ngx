@@ -1,8 +1,8 @@
-# Paperless NGX Development Environment
+# Paperless-ngx Development Environment
 
 ## Overview
 
-Welcome to the Paperless NGX development environment! This setup uses VSCode DevContainers to provide a consistent and seamless development experience.
+Welcome to the Paperless-ngx development environment! This setup uses VSCode DevContainers to provide a consistent and seamless development experience.
 
 ### What are DevContainers?
 
@@ -17,7 +17,7 @@ DevContainers are a feature in VSCode that allows you to develop within a Docker
 
 ## DevContainer Setup
 
-The DevContainer configuration provides up all the necessary services for Paperless NGX, including:
+The DevContainer configuration provides up all the necessary services for Paperless-ngx, including:
 
 - Redis
 - Gotenberg
@@ -36,7 +36,7 @@ The setup includes debugging configurations (`launch.json`) and tasks (`tasks.js
 - **Maintenance Tasks:**
   - Create superuser
   - Run migrations
-  - Recreate virtual environment (`.venv` with pipenv)
+  - Recreate virtual environment (`.venv` with `uv`)
   - Compile frontend assets
 
 ## Getting Started
@@ -85,7 +85,7 @@ Once the DevContainer is up and running, perform the following steps:
 
 You can start and debug backend services either as debugging sessions via `launch.json` or as tasks.
 
-#### Using `launch.json`:
+#### Using `launch.json`
 
 1. Press `F5` or go to the **Run and Debug** view in VSCode.
 2. Select the desired configuration:
@@ -93,7 +93,7 @@ You can start and debug backend services either as debugging sessions via `launc
    - `Document Consumer`
    - `Celery`
 
-#### Using Tasks:
+#### Using Tasks
 
 1. Open the command palette:
    - **Windows/Linux**: `Ctrl+Shift+P`
@@ -108,7 +108,7 @@ You can start and debug backend services either as debugging sessions via `launc
 
 Additional tasks are available for common maintenance operations:
 
-- **Recreate .venv**: For setting up the virtual environment using pipenv.
+- **Recreate .venv**: For setting up the virtual environment using `uv`.
 - **Migrate Database**: To apply database migrations.
 - **Create Superuser**: To create an admin user for the application.
 

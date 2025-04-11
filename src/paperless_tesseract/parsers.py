@@ -3,7 +3,6 @@ import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Optional
 
 from django.conf import settings
 from PIL import Image
@@ -40,6 +39,20 @@ class RasterisedDocumentParser(DocumentParser):
         This parser uses the OCR configuration settings to parse documents
         """
         return OcrConfig()
+
+    def get_page_count(self, document_path, mime_type):
+        page_count = None
+        if mime_type == "application/pdf":
+            try:
+                import pikepdf
+
+                with pikepdf.Pdf.open(document_path) as pdf:
+                    page_count = len(pdf.pages)
+            except Exception as e:
+                self.log.warning(
+                    f"Unable to determine PDF page count {document_path}: {e}",
+                )
+        return page_count
 
     def extract_metadata(self, document_path, mime_type):
         result = []
@@ -115,7 +128,7 @@ class RasterisedDocumentParser(DocumentParser):
         )
         return no_alpha_image
 
-    def get_dpi(self, image) -> Optional[int]:
+    def get_dpi(self, image) -> int | None:
         try:
             with Image.open(image) as im:
                 x, y = im.info["dpi"]
@@ -124,7 +137,7 @@ class RasterisedDocumentParser(DocumentParser):
             self.log.warning(f"Error while getting DPI from image {image}: {e}")
             return None
 
-    def calculate_a4_dpi(self, image) -> Optional[int]:
+    def calculate_a4_dpi(self, image) -> int | None:
         try:
             with Image.open(image) as im:
                 width, height = im.size
@@ -139,14 +152,14 @@ class RasterisedDocumentParser(DocumentParser):
 
     def extract_text(
         self,
-        sidecar_file: Optional[Path],
+        sidecar_file: Path | None,
         pdf_file: Path,
-    ) -> Optional[str]:
+    ) -> str | None:
         # When re-doing OCR, the sidecar contains ONLY the new text, not
         # the whole text, so do not utilize it in that case
         if (
             sidecar_file is not None
-            and os.path.isfile(sidecar_file)
+            and sidecar_file.is_file()
             and self.settings.mode != "redo"
         ):
             text = self.read_file_handle_unicode_errors(sidecar_file)
@@ -161,7 +174,7 @@ class RasterisedDocumentParser(DocumentParser):
 
         # no success with the sidecar file, try PDF
 
-        if not os.path.isfile(pdf_file):
+        if not Path(pdf_file).is_file():
             return None
 
         try:
@@ -201,6 +214,7 @@ class RasterisedDocumentParser(DocumentParser):
         mime_type,
         output_file,
         sidecar_file,
+        *,
         safe_fallback=False,
     ):
         if TYPE_CHECKING:
@@ -352,9 +366,10 @@ class RasterisedDocumentParser(DocumentParser):
         from ocrmypdf import EncryptedPdfError
         from ocrmypdf import InputFileError
         from ocrmypdf import SubprocessOutputError
+        from ocrmypdf.exceptions import DigitalSignatureError
 
-        archive_path = Path(os.path.join(self.tempdir, "archive.pdf"))
-        sidecar_file = Path(os.path.join(self.tempdir, "sidecar.txt"))
+        archive_path = Path(self.tempdir) / "archive.pdf"
+        sidecar_file = Path(self.tempdir) / "sidecar.txt"
 
         args = self.construct_ocrmypdf_parameters(
             document_path,
@@ -374,9 +389,9 @@ class RasterisedDocumentParser(DocumentParser):
 
             if not self.text:
                 raise NoTextFoundException("No text was found in the original document")
-        except EncryptedPdfError:
+        except (DigitalSignatureError, EncryptedPdfError):
             self.log.warning(
-                "This file is encrypted, OCR is impossible. Using "
+                "This file is encrypted and/or signed, OCR is impossible. Using "
                 "any text present in the original file.",
             )
             if original_has_text:
@@ -397,12 +412,8 @@ class RasterisedDocumentParser(DocumentParser):
                 f"Attempting force OCR to get the text.",
             )
 
-            archive_path_fallback = Path(
-                os.path.join(self.tempdir, "archive-fallback.pdf"),
-            )
-            sidecar_file_fallback = Path(
-                os.path.join(self.tempdir, "sidecar-fallback.txt"),
-            )
+            archive_path_fallback = Path(self.tempdir) / "archive-fallback.pdf"
+            sidecar_file_fallback = Path(self.tempdir) / "sidecar-fallback.txt"
 
             # Attempt to run OCR with safe settings.
 
@@ -441,8 +452,7 @@ class RasterisedDocumentParser(DocumentParser):
                 self.text = text_original
             else:
                 self.log.warning(
-                    f"No text was found in {document_path}, the content will "
-                    f"be empty.",
+                    f"No text was found in {document_path}, the content will be empty.",
                 )
                 self.text = ""
 

@@ -1,3 +1,4 @@
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
 import { provideHttpClientTesting } from '@angular/common/http/testing'
 import {
   ComponentFixture,
@@ -7,27 +8,17 @@ import {
 } from '@angular/core/testing'
 import { By } from '@angular/platform-browser'
 import { RouterTestingModule } from '@angular/router/testing'
-import {
-  NgbModule,
-  NgbAlertModule,
-  NgbAlert,
-  NgbCollapse,
-} from '@ng-bootstrap/ng-bootstrap'
+import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
 import { routes } from 'src/app/app-routing.module'
-import { IfPermissionsDirective } from 'src/app/directives/if-permissions.directive'
 import { PermissionsGuard } from 'src/app/guards/permissions.guard'
-import {
-  ConsumerStatusService,
-  FileStatus,
-  FileStatusPhase,
-} from 'src/app/services/consumer-status.service'
 import { PermissionsService } from 'src/app/services/permissions.service'
 import { UploadDocumentsService } from 'src/app/services/upload-documents.service'
-import { WidgetFrameComponent } from '../widget-frame/widget-frame.component'
+import {
+  FileStatus,
+  FileStatusPhase,
+  WebsocketStatusService,
+} from 'src/app/services/websocket-status.service'
 import { UploadFileWidgetComponent } from './upload-file-widget.component'
-import { DragDropModule } from '@angular/cdk/drag-drop'
-import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
 
 const FAILED_STATUSES = [new FileStatus()]
 const WORKING_STATUSES = [new FileStatus(), new FileStatus()]
@@ -50,22 +41,15 @@ const DEFAULT_STATUSES = [
 describe('UploadFileWidgetComponent', () => {
   let component: UploadFileWidgetComponent
   let fixture: ComponentFixture<UploadFileWidgetComponent>
-  let consumerStatusService: ConsumerStatusService
+  let websocketStatusService: WebsocketStatusService
   let uploadDocumentsService: UploadDocumentsService
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
-      declarations: [
-        UploadFileWidgetComponent,
-        WidgetFrameComponent,
-        IfPermissionsDirective,
-      ],
       imports: [
-        NgbModule,
         RouterTestingModule.withRoutes(routes),
-        NgbAlertModule,
-        DragDropModule,
         NgxBootstrapIconsModule.pick(allIcons),
+        UploadFileWidgetComponent,
       ],
       providers: [
         PermissionsGuard,
@@ -80,7 +64,7 @@ describe('UploadFileWidgetComponent', () => {
       ],
     }).compileComponents()
 
-    consumerStatusService = TestBed.inject(ConsumerStatusService)
+    websocketStatusService = TestBed.inject(WebsocketStatusService)
     uploadDocumentsService = TestBed.inject(UploadDocumentsService)
     fixture = TestBed.createComponent(UploadFileWidgetComponent)
     component = fixture.componentInstance
@@ -106,14 +90,14 @@ describe('UploadFileWidgetComponent', () => {
   })
 
   it('should generate stats summary', () => {
-    mockConsumerStatuses(consumerStatusService)
+    mockConsumerStatuses(websocketStatusService)
     expect(component.getStatusSummary()).toEqual(
       'Processing: 6, Failed: 1, Added: 4'
     )
   })
 
   it('should report an upload progress summary', () => {
-    mockConsumerStatuses(consumerStatusService)
+    mockConsumerStatuses(websocketStatusService)
     expect(component.getTotalUploadProgress()).toEqual(0.75)
   })
 
@@ -131,34 +115,19 @@ describe('UploadFileWidgetComponent', () => {
     expect(component.getStatusColor(successStatus)).toEqual('success')
   })
 
-  it('should enforce a maximum number of alerts', () => {
-    mockConsumerStatuses(consumerStatusService)
-    fixture.detectChanges()
-    // 5 total, 1 hidden
-    expect(fixture.debugElement.queryAll(By.directive(NgbAlert))).toHaveLength(
-      6
-    )
-    expect(
-      fixture.debugElement
-        .query(By.directive(NgbCollapse))
-        .queryAll(By.directive(NgbAlert))
-    ).toHaveLength(1)
-  })
-
   it('should allow dismissing an alert', () => {
-    const dismissSpy = jest.spyOn(consumerStatusService, 'dismiss')
+    const dismissSpy = jest.spyOn(websocketStatusService, 'dismiss')
     component.dismiss(new FileStatus())
     expect(dismissSpy).toHaveBeenCalled()
   })
 
   it('should allow dismissing completed alerts', fakeAsync(() => {
-    mockConsumerStatuses(consumerStatusService)
-    component.alertsExpanded = true
+    mockConsumerStatuses(websocketStatusService)
     fixture.detectChanges()
     jest
       .spyOn(component, 'getStatusCompleted')
       .mockImplementation(() => SUCCESS_STATUSES)
-    const dismissSpy = jest.spyOn(consumerStatusService, 'dismiss')
+    const dismissSpy = jest.spyOn(websocketStatusService, 'dismiss')
     component.dismissCompleted()
     tick(1000)
     fixture.detectChanges()

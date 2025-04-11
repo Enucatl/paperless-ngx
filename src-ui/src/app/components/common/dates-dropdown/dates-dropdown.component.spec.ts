@@ -1,24 +1,24 @@
+import { DatePipe } from '@angular/common'
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
+import { provideHttpClientTesting } from '@angular/common/http/testing'
 import {
   ComponentFixture,
   TestBed,
   fakeAsync,
   tick,
 } from '@angular/core/testing'
-let fixture: ComponentFixture<DatesDropdownComponent>
-import {
-  DatesDropdownComponent,
-  DateSelection,
-  RelativeDate,
-} from './dates-dropdown.component'
-import { provideHttpClientTesting } from '@angular/common/http/testing'
+import { FormsModule, ReactiveFormsModule } from '@angular/forms'
 import { NgbModule } from '@ng-bootstrap/ng-bootstrap'
+import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
+import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
 import { SettingsService } from 'src/app/services/settings.service'
 import { ClearableBadgeComponent } from '../clearable-badge/clearable-badge.component'
-import { FormsModule, ReactiveFormsModule } from '@angular/forms'
-import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
-import { DatePipe } from '@angular/common'
-import { NgxBootstrapIconsModule, allIcons } from 'ngx-bootstrap-icons'
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http'
+import {
+  DateSelection,
+  DatesDropdownComponent,
+  RelativeDate,
+} from './dates-dropdown.component'
+let fixture: ComponentFixture<DatesDropdownComponent>
 
 describe('DatesDropdownComponent', () => {
   let component: DatesDropdownComponent
@@ -27,16 +27,14 @@ describe('DatesDropdownComponent', () => {
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
-      declarations: [
-        DatesDropdownComponent,
-        ClearableBadgeComponent,
-        CustomDatePipe,
-      ],
       imports: [
         NgbModule,
         FormsModule,
         ReactiveFormsModule,
         NgxBootstrapIconsModule.pick(allIcons),
+        DatesDropdownComponent,
+        ClearableBadgeComponent,
+        CustomDatePipe,
       ],
       providers: [
         SettingsService,
@@ -63,7 +61,7 @@ describe('DatesDropdownComponent', () => {
 
   it('should support date input, emit change', fakeAsync(() => {
     let result: string
-    component.createdDateAfterChange.subscribe((date) => (result = date))
+    component.createdDateFromChange.subscribe((date) => (result = date))
     const input: HTMLInputElement = fixture.nativeElement.querySelector('input')
     input.value = '5/30/2023'
     input.dispatchEvent(new Event('change'))
@@ -84,73 +82,86 @@ describe('DatesDropdownComponent', () => {
   it('should support relative dates', fakeAsync(() => {
     let result: DateSelection
     component.datesSet.subscribe((date) => (result = date))
-    component.setCreatedRelativeDate(null)
-    component.setCreatedRelativeDate(RelativeDate.LAST_7_DAYS)
-    component.setAddedRelativeDate(null)
-    component.setAddedRelativeDate(RelativeDate.LAST_7_DAYS)
+    component.createdRelativeDate = RelativeDate.WITHIN_1_WEEK // normally set by ngModel binding in dropdown
+    component.onSetCreatedRelativeDate({
+      id: RelativeDate.WITHIN_1_WEEK,
+    } as any)
+    component.addedRelativeDate = RelativeDate.WITHIN_1_WEEK // normally set by ngModel binding in dropdown
+    component.onSetAddedRelativeDate({ id: RelativeDate.WITHIN_1_WEEK } as any)
     tick(500)
     expect(result).toEqual({
-      createdAfter: null,
-      createdBefore: null,
-      createdRelativeDateID: RelativeDate.LAST_7_DAYS,
-      addedAfter: null,
-      addedBefore: null,
-      addedRelativeDateID: RelativeDate.LAST_7_DAYS,
+      createdFrom: null,
+      createdTo: null,
+      createdRelativeDateID: RelativeDate.WITHIN_1_WEEK,
+      addedFrom: null,
+      addedTo: null,
+      addedRelativeDateID: RelativeDate.WITHIN_1_WEEK,
     })
   }))
 
   it('should support report if active', () => {
-    component.createdRelativeDate = RelativeDate.LAST_7_DAYS
+    component.createdRelativeDate = RelativeDate.WITHIN_1_WEEK
     expect(component.isActive).toBeTruthy()
     component.createdRelativeDate = null
-    component.createdDateAfter = '2023-05-30'
+    component.createdDateFrom = '2023-05-30'
     expect(component.isActive).toBeTruthy()
-    component.createdDateAfter = null
-    component.createdDateBefore = '2023-05-30'
+    component.createdDateFrom = null
+    component.createdDateTo = '2023-05-30'
     expect(component.isActive).toBeTruthy()
-    component.createdDateBefore = null
+    component.createdDateTo = null
 
-    component.addedRelativeDate = RelativeDate.LAST_7_DAYS
+    component.addedRelativeDate = RelativeDate.WITHIN_1_WEEK
     expect(component.isActive).toBeTruthy()
     component.addedRelativeDate = null
-    component.addedDateAfter = '2023-05-30'
+    component.addedDateFrom = '2023-05-30'
     expect(component.isActive).toBeTruthy()
-    component.addedDateAfter = null
-    component.addedDateBefore = '2023-05-30'
+    component.addedDateFrom = null
+    component.addedDateTo = '2023-05-30'
     expect(component.isActive).toBeTruthy()
-    component.addedDateBefore = null
+    component.addedDateTo = null
 
     expect(component.isActive).toBeFalsy()
   })
 
   it('should support reset', () => {
-    component.createdDateAfter = '2023-05-30'
+    component.createdDateFrom = '2023-05-30'
     component.reset()
-    expect(component.createdDateAfter).toBeNull()
+    expect(component.createdDateFrom).toBeNull()
   })
 
-  it('should support clearAfter', () => {
-    component.createdDateAfter = '2023-05-30'
-    component.clearCreatedAfter()
-    expect(component.createdDateAfter).toBeNull()
+  it('should support clearFrom', () => {
+    component.createdDateFrom = '2023-05-30'
+    component.clearCreatedFrom()
+    expect(component.createdDateFrom).toBeNull()
 
-    component.addedDateAfter = '2023-05-30'
-    component.clearAddedAfter()
-    expect(component.addedDateAfter).toBeNull()
+    component.addedDateFrom = '2023-05-30'
+    component.clearAddedFrom()
+    expect(component.addedDateFrom).toBeNull()
   })
 
-  it('should support clearBefore', () => {
-    component.createdDateBefore = '2023-05-30'
-    component.clearCreatedBefore()
-    expect(component.createdDateBefore).toBeNull()
+  it('should support clearTo', () => {
+    component.createdDateTo = '2023-05-30'
+    component.clearCreatedTo()
+    expect(component.createdDateTo).toBeNull()
 
-    component.addedDateBefore = '2023-05-30'
-    component.clearAddedBefore()
-    expect(component.addedDateBefore).toBeNull()
+    component.addedDateTo = '2023-05-30'
+    component.clearAddedTo()
+    expect(component.addedDateTo).toBeNull()
+  })
+
+  it('should support clearRelativeDate', () => {
+    component.createdRelativeDate = RelativeDate.WITHIN_1_WEEK
+    component.clearCreatedRelativeDate()
+    expect(component.createdRelativeDate).toBeNull()
+
+    component.addedRelativeDate = RelativeDate.WITHIN_1_WEEK
+    component.clearAddedRelativeDate()
+    expect(component.addedRelativeDate).toBeNull()
   })
 
   it('should limit keyboard events', () => {
-    const input: HTMLInputElement = fixture.nativeElement.querySelector('input')
+    const input: HTMLInputElement =
+      fixture.nativeElement.querySelector('input.form-control')
     let event: KeyboardEvent = new KeyboardEvent('keypress', {
       key: '9',
     })
@@ -165,4 +176,19 @@ describe('DatesDropdownComponent', () => {
     input.dispatchEvent(event)
     expect(eventSpy).toHaveBeenCalled()
   })
+
+  it('should support debounce', fakeAsync(() => {
+    let result: DateSelection
+    component.datesSet.subscribe((date) => (result = date))
+    component.onChangeDebounce()
+    tick(500)
+    expect(result).toEqual({
+      createdFrom: null,
+      createdTo: null,
+      createdRelativeDateID: null,
+      addedFrom: null,
+      addedTo: null,
+      addedRelativeDateID: null,
+    })
+  }))
 })

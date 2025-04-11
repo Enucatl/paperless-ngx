@@ -1,7 +1,6 @@
 import re
 from html import escape
 from pathlib import Path
-from typing import Optional
 
 from bleach import clean
 from bleach import linkify
@@ -23,6 +22,7 @@ from documents.parsers import DocumentParser
 from documents.parsers import ParseError
 from documents.parsers import make_thumbnail_from_pdf
 from paperless.models import OutputTypeChoices
+from paperless_mail.models import MailRule
 
 
 class MailDocumentParser(DocumentParser):
@@ -33,7 +33,7 @@ class MailDocumentParser(DocumentParser):
 
     logging_name = "paperless.parsing.mail"
 
-    def _settings_to_gotenberg_pdfa(self) -> Optional[PdfAFormat]:
+    def _settings_to_gotenberg_pdfa(self) -> PdfAFormat | None:
         """
         Converts our requested PDF/A output into the Gotenberg API
         format
@@ -44,7 +44,7 @@ class MailDocumentParser(DocumentParser):
         }:
             return PdfAFormat.A2b
         elif settings.OCR_OUTPUT_TYPE == OutputTypeChoices.PDF_A1:  # pragma: no cover
-            self.log.warn(
+            self.log.warning(
                 "Gotenberg does not support PDF/A-1a, choosing PDF/A-2b instead",
             )
             return PdfAFormat.A2b
@@ -122,7 +122,13 @@ class MailDocumentParser(DocumentParser):
         result.sort(key=lambda item: (item["prefix"], item["key"]))
         return result
 
-    def parse(self, document_path: Path, mime_type: str, file_name=None):
+    def parse(
+        self,
+        document_path: Path,
+        mime_type: str,
+        file_name=None,
+        mailrule_id: int | None = None,
+    ):
         """
         Parses the given .eml into formatted text, based on the decoded email.
 
@@ -181,7 +187,11 @@ class MailDocumentParser(DocumentParser):
             self.date = mail.date
 
         self.log.debug("Creating a PDF from the email")
-        self.archive_path = self.generate_pdf(mail)
+        if mailrule_id:
+            rule = MailRule.objects.get(pk=mailrule_id)
+            self.archive_path = self.generate_pdf(mail, rule.pdf_layout)
+        else:
+            self.archive_path = self.generate_pdf(mail)
 
     @staticmethod
     def parse_file_to_message(filepath: Path) -> MailMessage:
@@ -218,10 +228,18 @@ class MailDocumentParser(DocumentParser):
                 f"{settings.TIKA_ENDPOINT}: {err}",
             ) from err
 
-    def generate_pdf(self, mail_message: MailMessage) -> Path:
+    def generate_pdf(
+        self,
+        mail_message: MailMessage,
+        pdf_layout: MailRule.PdfLayout | None = None,
+    ) -> Path:
         archive_path = Path(self.tempdir) / "merged.pdf"
 
         mail_pdf_file = self.generate_pdf_from_mail(mail_message)
+
+        pdf_layout = (
+            pdf_layout or settings.EMAIL_PARSE_DEFAULT_LAYOUT
+        )  # EMAIL_PARSE_DEFAULT_LAYOUT is a MailRule.PdfLayout
 
         # If no HTML content, create the PDF from the message
         # Otherwise, create 2 PDFs and merge them with Gotenberg
@@ -247,7 +265,15 @@ class MailDocumentParser(DocumentParser):
                 if pdf_a_format is not None:
                     route.pdf_format(pdf_a_format)
 
-                route.merge([mail_pdf_file, pdf_of_html_content])
+                match pdf_layout:
+                    case MailRule.PdfLayout.HTML_TEXT:
+                        route.merge([pdf_of_html_content, mail_pdf_file])
+                    case MailRule.PdfLayout.HTML_ONLY:
+                        route.merge([pdf_of_html_content])
+                    case MailRule.PdfLayout.TEXT_ONLY:
+                        route.merge([mail_pdf_file])
+                    case MailRule.PdfLayout.TEXT_HTML | _:
+                        route.merge([mail_pdf_file, pdf_of_html_content])
 
                 try:
                     response = route.run()
