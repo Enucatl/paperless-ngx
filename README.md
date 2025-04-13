@@ -27,7 +27,7 @@ I use this to run my own paperless-ngx instance.
   ```bash
   docker compose -f docker/compose/docker-compose.postgres-tika.yml run --rm db
   ```
-3. In another tab, dump the databse contents
+3. In another tab, dump the database contents
   ```bash
   docker compose -f docker/compose/docker-compose.postgres-tika.yml exec -T db pg_dumpall -U paperless  > ~/Downloads/dump.sql
   ```
