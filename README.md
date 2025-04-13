@@ -20,6 +20,35 @@
 It contains my edits to [docker/compose/docker-compose.postgres-tika.yml](https://github.com/Enucatl/paperless-ngx/blob/main/docker/compose/docker-compose.postgres-tika.yml).
 I use this to run my own paperless-ngx instance.
 
+### How to upgrade postgresql version
+
+1. Stop the paperless stack
+2. Start only the `db` container
+  ```bash
+  docker compose -f docker/compose/docker-compose.postgres-tika.yml run --rm db
+  ```
+3. In another tab, dump the databse contents
+  ```bash
+  docker compose -f docker/compose/docker-compose.postgres-tika.yml exec -T db pg_dumpall -U paperless  > ~/Downloads/dump.sql
+  ```
+4. Stop the `db` container
+5. Move and recreate the volume
+  ```bash
+  sudo mv /var/lib/docker/volumes/paperless-ngx_pgdata{,_old}
+  sudo mkdir -p /var/lib/docker/volumes/paperless-ngx_pgdata/_data
+  ```
+6. Update the postgres image in the `docker-compose.postgres-tika.yml` file to
+   the new version
+7. Start the new `db` container (see 2.)
+8. Restore the data
+  ```bash
+  cat ~/Downloads/dump.sql | docker compose -f docker/compose/docker-compose.postgres-tika.yml exec -T db psql -U paperless
+  ```
+9. If everything works, remove the backup folder
+  ```bash
+  sudo rm -r /var/lib/docker/volumes/paperless-ngx_pgdata_old
+  ```
+
 # Paperless-ngx
 
 Paperless-ngx is a document management system that transforms your physical documents into a searchable online archive so you can keep, well, _less paper_.
