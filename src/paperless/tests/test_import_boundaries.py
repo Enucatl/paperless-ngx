@@ -24,6 +24,8 @@ _PROCESSING_MODULES = (
 )
 _UNUSED_IMPLEMENTATIONS = (
     "dateparser",
+    "img2pdf",
+    "lxml",
     "pikepdf",
     "tantivy",
     "ocrmypdf",
@@ -65,6 +67,14 @@ sys.stdout.buffer.write(payload)
 @pytest.mark.parametrize(
     ("operation", "forbidden"),
     [
+        pytest.param(
+            "import django\n"
+            "django.setup()\n"
+            "import documents.barcodes, documents.converters, documents.double_sided\n"
+            "import paperless.validators\n",
+            ("pikepdf", "img2pdf", "lxml"),
+            id="pdf-and-svg-modules-without-processing-libraries",
+        ),
         pytest.param(
             "import paperless.settings\n",
             ("dateparser",),
