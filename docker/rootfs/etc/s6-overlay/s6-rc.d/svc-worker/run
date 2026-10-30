@@ -3,6 +3,9 @@
 
 cd ${PAPERLESS_SRC_DIR}
 
+# init-system-checks validates Django before these services start.
+export CELERY_SKIP_CHECKS=1
+
 if [[ -n "${USER_IS_NON_ROOT}" ]]; then
 	exec /usr/local/bin/celery --app paperless worker --loglevel INFO --without-mingle --without-gossip
 else
