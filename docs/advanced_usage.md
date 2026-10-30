@@ -839,7 +839,7 @@ mount it into `/custom-cont-init.d`:
 #!/bin/bash
 # /path/to/my/scripts/install-parsers.sh
 
-pip install my-paperless-parser-package
+uv pip install --system my-paperless-parser-package
 ```
 
 Mount it in your `docker-compose.yml`:

@@ -1,7 +1,9 @@
 name: Backend Tests
 on:
+  workflow_call:
   push:
     branches-ignore:
+      - dev
       - 'translations**'
   pull_request:
     branches-ignore:
@@ -85,7 +87,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.14']
       fail-fast: false
     steps:
       - name: Checkout
@@ -159,7 +161,7 @@ jobs:
     permissions:
       contents: read
     env:
-      DEFAULT_PYTHON: "3.12"
+      DEFAULT_PYTHON: "3.14"
       PAPERLESS_SECRET_KEY: "ci-typing-not-a-real-secret"
     steps:
       - name: Checkout
@@ -220,9 +222,15 @@ jobs:
       - name: Check gate
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           TEST_RESULT: ${{ needs.test.result }}
           TYPING_RESULT: ${{ needs.typing.result }}
         run: |
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "::error::Backend change detection result: ${CHANGES_RESULT}"
+            exit 1
+          fi
+
           if [[ "${BACKEND_CHANGED}" != "true" ]]; then
             echo "No backend-relevant changes detected."
             exit 0

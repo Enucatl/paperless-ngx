@@ -1,7 +1,9 @@
 name: Static Analysis
 on:
+  workflow_call:
   push:
     branches-ignore:
+      - dev
       - 'translations**'
   pull_request:
     branches-ignore:

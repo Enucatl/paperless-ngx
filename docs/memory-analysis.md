@@ -16,11 +16,11 @@ For the curious among us:
 4. **Djangoless watcher and scheduler**: Replaced by a small filesystem watcher and Supercronic. Both require an API token. The watcher submits a relative file path and metadata from the consumption directory; **it does not upload the document over HTTP**. The lightweight scheduler only keeps time: when a job is due, it calls the API, and the already-running Django web process queues the configured Celery task for the existing worker to execute. This is exactly what the current scheduler does, except that it doesn't call the API and it takes 150 MiB and a full django setup :/
 5. **Djangoless Celery parent and scale workers down to 0**: it moves Django initialization out of the remaining parent and into task children and temporary helpers. This has larger compatibility implications, since we must then avoid using django models in the celery parent.
 
-| Component                            | Upstream idle | Final idle |
-|--------------------------------------|--------------:|-----------:|
-| Web application and server processes |     242.1 MiB |  203.8 MiB |
-| Folder watcher                       |     147.9 MiB |   21.0 MiB |
-| Scheduler                            |     161.0 MiB |   10.1 MiB |
-| Celery parent                        |      98.3 MiB |   57.8 MiB |
-| Celery children                      |      90.2 MiB |    0.0 MiB |
-| **Total**                            | **739.5 MiB**| **292.7 MiB** |
+| Component                            | Upstream idle |    Final idle |
+| ------------------------------------ | ------------: | ------------: |
+| Web application and server processes |     242.1 MiB |     203.8 MiB |
+| Folder watcher                       |     147.9 MiB |      21.0 MiB |
+| Scheduler                            |     161.0 MiB |      10.1 MiB |
+| Celery parent                        |      98.3 MiB |      57.8 MiB |
+| Celery children                      |      90.2 MiB |       0.0 MiB |
+| **Total**                            | **739.5 MiB** | **292.7 MiB** |

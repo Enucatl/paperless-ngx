@@ -1,7 +1,9 @@
 name: Frontend Tests
 on:
+  workflow_call:
   push:
     branches-ignore:
+      - dev
       - 'translations**'
   pull_request:
     branches-ignore:
@@ -29,11 +31,8 @@ jobs:
         id: force
         env:
           EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "run_all=true" >> "$GITHUB_OUTPUT"
-          elif [[ "${EVENT_NAME}" == "push" && ( "${REF_NAME}" == "main" || "${REF_NAME}" == "dev" ) ]]; then
             echo "run_all=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_all=false" >> "$GITHUB_OUTPUT"
@@ -285,12 +284,18 @@ jobs:
       - name: Check gate
         env:
           BUILD_RESULT: ${{ needs['frontend-build'].result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           E2E_RESULT: ${{ needs['e2e-tests'].result }}
           FRONTEND_CHANGED: ${{ needs.changes.outputs.frontend_changed }}
           INSTALL_RESULT: ${{ needs['install-dependencies'].result }}
           LINT_RESULT: ${{ needs.lint.result }}
           UNIT_RESULT: ${{ needs['unit-tests'].result }}
         run: |
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "::error::Frontend change detection result: ${CHANGES_RESULT}"
+            exit 1
+          fi
+
           if [[ "${FRONTEND_CHANGED}" != "true" ]]; then
             echo "No frontend-relevant changes detected."
             exit 0

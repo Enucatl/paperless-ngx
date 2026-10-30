@@ -225,6 +225,9 @@ def test_interrupted_delivery_does_not_starve_later_record(
     monkeypatch.setattr(writer, "tick", lambda: None)
     writer.record_revoked(stuck.task_id, TASK)
     writer.record_revoked(later.task_id, TASK)
+    original_mtime = max(
+        path.stat().st_mtime_ns for path in writer.directory.glob("*.json")
+    )
     original = outcome_helper.apply_outcome
 
     def interrupted(task_id, *args, **kwargs):
@@ -235,6 +238,10 @@ def test_interrupted_delivery_does_not_starve_later_record(
     monkeypatch.setattr(outcome_helper, "apply_outcome", interrupted)
     with pytest.raises(SystemExit):
         outcome_helper.drain(writer.directory)
+    assert (
+        max(path.stat().st_mtime_ns for path in writer.directory.glob("*.json"))
+        > original_mtime
+    )
     with pytest.raises(SystemExit):
         outcome_helper.drain(writer.directory)
     later.refresh_from_db()

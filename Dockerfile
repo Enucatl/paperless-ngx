@@ -184,7 +184,9 @@ RUN set -eux; \
     curl --fail --silent --show-error --location \
       "https://github.com/aptible/supercronic/releases/download/v${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}" \
       --output /usr/local/bin/supercronic; \
-    echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum --check -; \
+    echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" > /tmp/supercronic.sha256; \
+    sha256sum --check /tmp/supercronic.sha256; \
+    rm /tmp/supercronic.sha256; \
     chmod 755 /usr/local/bin/supercronic
 
 WORKDIR /usr/src/paperless/src/
@@ -214,6 +216,8 @@ RUN set -eux \
       --index-strategy unsafe-best-match \
       --requirements requirements.txt \
   && echo "Cleaning up image" \
+    && uv pip uninstall --system pip \
+    && rm --recursive --force /usr/local/lib/python3.14/ensurepip \
     && apt-get --yes purge ${BUILD_PACKAGES} \
     && apt-get --yes autoremove --purge \
     && apt-get clean --yes \

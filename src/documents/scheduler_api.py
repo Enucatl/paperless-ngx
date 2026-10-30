@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import BasePermission
@@ -42,6 +44,7 @@ class SchedulerAPIView(APIView):
 
     permission_classes = (SuperuserPermission,)
 
+    @extend_schema(responses=OpenApiTypes.OBJECT)
     def get(self, request: Request) -> Response:
         """Return effective cron times without exposing the secret email offset seed."""
         jobs = []
@@ -63,6 +66,7 @@ class SchedulerAPIView(APIView):
             )
         return Response({"timezone": settings.CELERY_TIMEZONE, "jobs": jobs})
 
+    @extend_schema(request=ScheduledJobSerializer, responses=OpenApiTypes.OBJECT)
     def post(self, request: Request) -> Response:
         """Dispatch an enabled job only within its configured calendar minute."""
         serializer = ScheduledJobSerializer(data=request.data)

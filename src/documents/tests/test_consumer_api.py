@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 from documents.data_models import DocumentSource
 from documents.models import PaperlessTask
 from documents.models import Tag
+from paperless_testing.dirs import PaperlessDirs
 from paperless_testing.factories import UserFactory
 
 pytestmark = [pytest.mark.api, pytest.mark.django_db]
@@ -22,14 +23,9 @@ PUBLISH = "documents.consumption.consume_file.apply_async"
 
 
 @pytest.fixture
-def consume_root(tmp_path: Path, settings: Settings) -> Path:
+def consume_root(paperless_dirs: PaperlessDirs, settings: Settings) -> Path:
     """Use separate disposable directories with an explicit detection policy."""
-    root = tmp_path / "consume"
-    root.mkdir()
-    data = tmp_path / "data"
-    data.mkdir()
-    settings.CONSUMPTION_DIR = root
-    settings.DATA_DIR = data
+    root = paperless_dirs.consumption_dir
     settings.CONSUMER_RECURSIVE = True
     settings.CONSUMER_SUBDIRS_AS_TAGS = True
     settings.CONSUMER_POLLING_INTERVAL = 0.25

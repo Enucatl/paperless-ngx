@@ -23,6 +23,7 @@ def test_import_does_not_initialize_django() -> None:
             "import sys; import paperless_worker.outcomes; assert 'django' not in sys.modules",
         ],
         check=True,
+        cwd=Path(__file__).resolve().parents[2],
     )
 
 

@@ -739,7 +739,8 @@ class TestFileHandling(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
                 {"label": "cherry", "id": "ghi789"},
             ],
         }
-        cf.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            cf.save()
         self.assertEqual(generate_filename(doc), Path("document_aubergine.pdf"))
         # handler should have been called once via the async task
         self.assertEqual(m.call_count, 1)

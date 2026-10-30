@@ -1,0 +1,41 @@
+name: Rebase upstream
+on:
+  schedule:
+    - cron: '17 4 1 * *'
+  workflow_dispatch:
+concurrency:
+  group: rebase-upstream
+  cancel-in-progress: false
+permissions:
+  contents: write
+  actions: write
+jobs:
+  rebase:
+    if: github.repository == 'Enucatl/paperless-ngx'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Rebase and publish dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          gh auth setup-git
+          original=$(git rev-parse HEAD)
+          git fetch --no-tags https://github.com/paperless-ngx/paperless-ngx.git dev
+          if ! git rebase FETCH_HEAD; then
+            git rebase --abort
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$original" ]]; then
+            git push --force-with-lease="refs/heads/dev:$original" origin HEAD:refs/heads/dev
+          fi
+          # GITHUB_TOKEN pushes do not trigger workflows; dispatch checks and publication explicitly.
+          gh workflow run ci-docker.yml --ref dev --repo "$GITHUB_REPOSITORY"

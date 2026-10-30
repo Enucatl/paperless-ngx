@@ -74,10 +74,12 @@ def drain(directory: Path) -> bool:
             pending.append((path.stat(follow_symlinks=False).st_mtime_ns, path))
         except FileNotFoundError:
             continue
+    rotation_time = max((mtime for mtime, _ in pending), default=0)
     for _, path in sorted(pending)[:100]:
         try:
             # Rotate before delivery so even a killed helper cannot starve later records.
-            os.utime(path, follow_symlinks=False)
+            rotation_time += 1
+            os.utime(path, ns=(rotation_time, rotation_time), follow_symlinks=False)
             descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
             with os.fdopen(descriptor, "rb") as source:
                 payload = source.read(MAX_CALLBACK_BYTES + 1)

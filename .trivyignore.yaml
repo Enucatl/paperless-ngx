@@ -1,0 +1,5 @@
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - Dockerfile
+    statement: s6 starts as root for UID/GID remapping and volume ownership, then runs application services as paperless.

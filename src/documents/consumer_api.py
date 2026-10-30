@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from django.conf import settings
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from filelock import FileLock
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -61,6 +63,7 @@ class ConsumerAPIView(APIView):
 
     permission_classes = (SuperuserPermission,)
 
+    @extend_schema(responses=OpenApiTypes.OBJECT)
     def get(self, request: Request) -> Response:
         """Return the server's effective detection policy."""
         return Response(
@@ -75,6 +78,7 @@ class ConsumerAPIView(APIView):
             },
         )
 
+    @extend_schema(request=ConsumptionSerializer, responses=OpenApiTypes.OBJECT)
     def post(self, request: Request) -> Response:
         """Validate and admit a file once, retaining its original folder context."""
         serializer = ConsumptionSerializer(data=request.data)
