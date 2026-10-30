@@ -16,6 +16,8 @@ from drf_spectacular.views import SpectacularAPIView
 from drf_spectacular.views import SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
+from documents.consumer_api import ConsumerAPIView
+from documents.scheduler_api import SchedulerAPIView
 from documents.views import BulkDownloadView
 from documents.views import BulkEditObjectsView
 from documents.views import BulkEditView
@@ -99,6 +101,8 @@ urlpatterns = [
         r"^api/",
         include(
             [
+                path("services/scheduler/", SchedulerAPIView.as_view()),
+                path("services/consumer/", ConsumerAPIView.as_view()),
                 re_path(
                     "^auth/",
                     include(

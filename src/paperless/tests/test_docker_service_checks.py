@@ -124,10 +124,23 @@ def test_service_exec(
 
 
 @pytest.mark.parametrize("non_root", ["", "1"])
-def test_disabled_watcher(service_env: dict[str, str], non_root: str) -> None:
-    """Disabling the watcher still stops the service without starting Django."""
-    service_env.update(USER_IS_NON_ROOT=non_root, PAPERLESS_CONSUMER_DISABLE="1")
-    result = launch_spy("svc-consumer", service_env)
+@pytest.mark.parametrize(
+    ("service", "disable"),
+    [
+        ("svc-consumer", "PAPERLESS_CONSUMER_DISABLE"),
+        ("svc-scheduler", "PAPERLESS_SCHEDULER_DISABLE"),
+    ],
+)
+def test_disabled_service(
+    service_env: dict[str, str],
+    non_root: str,
+    service: str,
+    disable: str,
+) -> None:
+    """Either resident service can be disabled without starting Django."""
+    service_env.update(USER_IS_NON_ROOT=non_root)
+    service_env[disable] = "1"
+    result = launch_spy(service, service_env)
     assert result["argv"] == ["s6-svc", "-Od", "."]
     assert result["skip"] is None
 
@@ -227,3 +240,41 @@ with patch('django.core.checks.run_checks', side_effect=record_checks):
     )
     assert result.returncode == 85, result.stdout + result.stderr
     assert "PAPERLESS_CONSUMPTION_DIR is set but doesn't exist" in result.stdout
+
+
+@pytest.mark.parametrize("non_root", ["", "1"])
+@pytest.mark.parametrize(
+    ("service", "enable", "disable", "command"),
+    [
+        (
+            "svc-scheduler",
+            "PAPERLESS_USE_API_SCHEDULER",
+            "PAPERLESS_SCHEDULER_DISABLE",
+            ["python3", "-m", "paperless_services.scheduler", "run"],
+        ),
+        (
+            "svc-consumer",
+            "PAPERLESS_USE_API_CONSUMER",
+            "PAPERLESS_CONSUMER_DISABLE",
+            ["python3", "-m", "paperless_services.watcher"],
+        ),
+    ],
+)
+def test_api_service_is_opt_in(
+    service_env: dict[str, str],
+    non_root: str,
+    service: str,
+    enable: str,
+    disable: str,
+    command: list[str],
+) -> None:
+    """Each optional API client replaces only its service and respects disablement."""
+    service_env.update(USER_IS_NON_ROOT=non_root)
+    service_env[enable] = "1"
+    result = launch_spy(service, service_env)
+    assert (
+        result["argv"] == ([] if non_root else ["s6-setuidgid", "paperless"]) + command
+    )
+    assert result["skip"] is None
+    service_env[disable] = "1"
+    assert launch_spy(service, service_env)["argv"] == ["s6-svc", "-Od", "."]

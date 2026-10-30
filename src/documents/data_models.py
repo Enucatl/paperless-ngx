@@ -163,21 +163,26 @@ class ConsumableDocument:
     root_document_id: int | None = None
     original_path: Path | None = None
     mailrule_id: int | None = None
-    mime_type: str = dataclasses.field(init=False, default=None)
+    mime_type: str | None = dataclasses.field(init=False, default=None)
+    defer_mime_type: dataclasses.InitVar[bool] = dataclasses.field(
+        default=False,
+        kw_only=True,
+    )
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, defer_mime_type: bool) -> None:
         """
         After a dataclass is initialized, this is called to finalize some data
         1. Make sure the original path is an absolute, fully qualified path
-        2. Get the mime type of the file
+        2. Get the mime type unless detection is deferred to the worker
         """
         # Always fully qualify the path first thing
         # Just in case, convert to a path if it's a str
         self.original_file = Path(self.original_file).resolve()
 
-        # Get the file type once at init
-        # Note this function isn't called when the object is unpickled
-        self.mime_type = magic.from_file(self.original_file, mime=True)
+        # API folder admission leaves native detection to the ingestion worker.
+        # This method is not called when the task payload is unpickled.
+        if not defer_mime_type:
+            self.mime_type = magic.from_file(self.original_file, mime=True)
 
 
 class ConsumeFileDuplicateResult(TypedDict):

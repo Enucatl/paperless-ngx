@@ -28,14 +28,14 @@ from django.db import DatabaseError
 from django.test import override_settings
 from watchfiles import Change
 
+from documents.consumption import _consume_file
+from documents.consumption import _tags_from_path
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentSource
 from documents.management.commands.document_consumer import Command
 from documents.management.commands.document_consumer import ConsumerFilter
 from documents.management.commands.document_consumer import FileStabilityTracker
 from documents.management.commands.document_consumer import TrackedFile
-from documents.management.commands.document_consumer import _consume_file
-from documents.management.commands.document_consumer import _tags_from_path
 from documents.models import Tag
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ def consumer_filter() -> ConsumerFilter:
 def mock_consume_file_delay(mocker: MockerFixture) -> MagicMock:
     """Mock the consume_file task."""
     return mocker.patch(
-        "documents.management.commands.document_consumer.consume_file",
+        "documents.consumption.consume_file",
     )
 
 
@@ -608,7 +608,7 @@ class TestConsumeFile:
         shutil.copy(sample_pdf, target)
 
         mocker.patch(
-            "documents.management.commands.document_consumer._tags_from_path",
+            "documents.consumption._tags_from_path",
             side_effect=DatabaseError("Something happened"),
         )
 
@@ -1145,7 +1145,7 @@ class TestCommandWatchRecursive:
         """Test subdirs_as_tags creates tags from directory names."""
         # Mock _tags_from_path to avoid database operations in the consumer thread
         mock_tags = mocker.patch(
-            "documents.management.commands.document_consumer._tags_from_path",
+            "documents.consumption._tags_from_path",
             return_value=[1, 2],
         )
 
@@ -1207,7 +1207,7 @@ class TestCommandWatchEdgeCases:
     ) -> None:
         """Test handles exceptions from consume task gracefully."""
         mock_task = mocker.patch(
-            "documents.management.commands.document_consumer.consume_file",
+            "documents.consumption.consume_file",
         )
         mock_task.apply_async.side_effect = Exception("Task error")
 

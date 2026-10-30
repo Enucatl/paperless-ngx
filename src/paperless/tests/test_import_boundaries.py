@@ -103,13 +103,23 @@ _REQUIRED_TASKS = (
             "django.setup()\n"
             "from django.urls import reverse\n"
             "assert reverse('document-list') == '/api/documents/'\n",
-            _UNUSED_IMPLEMENTATIONS,
+            (
+                *_UNUSED_IMPLEMENTATIONS,
+                "watchfiles",
+                "paperless_services.watching",
+                "documents.management.commands.document_consumer",
+            ),
             id="urls-without-processing",
         ),
         pytest.param(
             "from paperless.asgi import application\n"
             "assert {'http', 'websocket'} <= application.application_mapping.keys()\n",
-            _UNUSED_IMPLEMENTATIONS,
+            (
+                *_UNUSED_IMPLEMENTATIONS,
+                "watchfiles",
+                "paperless_services.watching",
+                "documents.management.commands.document_consumer",
+            ),
             id="asgi-without-processing",
         ),
         pytest.param(

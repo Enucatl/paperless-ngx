@@ -324,6 +324,7 @@ testpaths = [
   "src/paperless/tests/",
   "src/paperless_mail/tests/",
   "src/paperless_ai/tests",
+  "src/paperless_services/tests/",
 ]
 
 [tool.pytest_env]

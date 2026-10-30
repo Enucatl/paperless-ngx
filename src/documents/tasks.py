@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from tempfile import mkstemp
 
+import magic
 from celery import Task
 from celery import shared_task
 from django.conf import settings
@@ -188,6 +189,13 @@ def consume_file(
 
     token = consume_task_id.set((self.request.id or "")[:8])
     try:
+        if input_doc.mime_type is None:
+            input_doc.mime_type = magic.from_file(input_doc.original_file, mime=True)
+            receipt = PaperlessTask.objects.filter(task_id=self.request.id).first()
+            if receipt is not None:
+                receipt.input_data["mime_type"] = input_doc.mime_type
+                receipt.save(update_fields=["input_data"])
+
         # Default no overrides
         if overrides is None:
             overrides = DocumentMetadataOverrides()
