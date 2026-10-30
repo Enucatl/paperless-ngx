@@ -19,7 +19,6 @@ from documents.models import WorkflowAction
 from documents.models import WorkflowTrigger
 from documents.plugins.base import StopConsumeTaskError
 from documents.signals import document_consumption_finished
-from documents.templating.workflows import parse_w_workflow_placeholders
 from documents.workflows.webhooks import send_webhook
 
 logger = logging.getLogger("paperless.workflows.actions")
@@ -112,13 +111,14 @@ def execute_email_action(
     """
     Execute an email action for a workflow.
     """
-
     if not settings.EMAIL_ENABLED:
         logger.error(
             "Email backend has not been configured, cannot send email notifications",
             extra={"group": logging_group},
         )
         return
+
+    from documents.templating.workflows import parse_w_workflow_placeholders
 
     try:
         subject = (
@@ -213,6 +213,8 @@ def execute_webhook_action(
     logging_group,
     original_file: Path,
 ):
+    from documents.templating.workflows import parse_w_workflow_placeholders
+
     try:
         data = {}
         if action.webhook.use_params:

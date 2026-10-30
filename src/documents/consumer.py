@@ -23,6 +23,7 @@ from documents.classifier import load_classifier
 from documents.data_models import ConsumableDocument
 from documents.data_models import ConsumeFileSuccessResult
 from documents.data_models import DocumentMetadataOverrides
+from documents.exceptions import ConsumerError
 from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_filename
 from documents.file_handling import generate_unique_filename
@@ -89,10 +90,6 @@ class WorkflowTriggerPlugin(
         if overrides:
             self.metadata.update(overrides)
         return msg
-
-
-class ConsumerError(Exception):
-    pass
 
 
 class ConsumeFileDuplicateError(ConsumerError):

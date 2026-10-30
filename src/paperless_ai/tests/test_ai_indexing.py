@@ -519,7 +519,7 @@ def test_query_after_remove_does_not_raise_key_error(
         added=timezone.now(),
     )
 
-    indexing.llm_index_remove_document(real_document)
+    indexing.llm_index_remove_document(document_id=real_document.pk)
 
     result = indexing.retrieve_similar_nodes(query_doc, top_k=5)
     assert isinstance(result, list)
@@ -725,7 +725,9 @@ class TestDocumentUpdatedSignalTriggersLlmReindex:
         doc = DocumentFactory()
         document_updated.send(sender=object, document=doc)
 
-        mock_task.apply_async.assert_called_once_with(kwargs={"document": doc})
+        mock_task.apply_async_on_commit.assert_called_once_with(
+            kwargs={"document_id": doc.pk},
+        )
 
     @pytest.mark.django_db
     @override_settings(AI_ENABLED=True, LLM_EMBEDDING_BACKEND="huggingface")
@@ -746,7 +748,7 @@ class TestDocumentUpdatedSignalTriggersLlmReindex:
         )
         document_updated.send(sender=object, document=root_doc, skip_ai_index=True)
 
-        assert mock_task.apply_async.call_count == 1
+        assert mock_task.apply_async_on_commit.call_count == 1
 
 
 @pytest.mark.django_db

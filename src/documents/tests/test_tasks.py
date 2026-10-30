@@ -435,6 +435,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
                 tasks.llmindex_index()
             update_llm_index.assert_called_once()
 
+    @override_settings(AI_ENABLED=True, LLM_EMBEDDING_BACKEND="huggingface")
     def test_update_document_in_llm_index(self) -> None:
         """
         GIVEN:
@@ -455,6 +456,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
             tasks.update_document_in_llm_index(doc)
             llm_index_add_or_update_document.assert_called_once_with(doc)
 
+    @override_settings(AI_ENABLED=True, LLM_EMBEDDING_BACKEND="huggingface")
     def test_remove_document_from_llm_index(self) -> None:
         """
         GIVEN:
@@ -473,7 +475,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
             "paperless_ai.indexing.llm_index_remove_document",
         ) as llm_index_remove_document:
             tasks.remove_document_from_llm_index(doc)
-            llm_index_remove_document.assert_called_once_with(doc)
+            llm_index_remove_document.assert_called_once_with(document_id=doc.pk)
 
     @override_settings(AI_ENABLED=True, LLM_EMBEDDING_BACKEND="huggingface")
     def test_bulk_update_does_not_enqueue_per_doc_llm_tasks(self) -> None:
@@ -500,7 +502,10 @@ class TestAIIndex(DirectoriesMixin, TestCase):
         ):
             doc_ids = [doc.pk for doc in docs]
             tasks.bulk_update_documents(doc_ids)
-            self.assertEqual(update_document_in_llm_index.apply_async.call_count, 0)
+            self.assertEqual(
+                update_document_in_llm_index.apply_async_on_commit.call_count,
+                0,
+            )
             update_llm_index.assert_called_once_with(
                 rebuild=False,
                 document_ids=doc_ids,
@@ -590,7 +595,9 @@ class TestApplyAISuggestionsTask(DirectoriesMixin, TestCase):
         ):
             tasks.apply_ai_suggestions(self.action.pk, self.doc.pk)
 
-        update_in_llm_index.apply_async.assert_called_once()
+        update_in_llm_index.apply_async_on_commit.assert_called_once_with(
+            kwargs={"document_id": self.doc.pk},
+        )
 
     def test_deleted_document_is_a_noop(self) -> None:
         """

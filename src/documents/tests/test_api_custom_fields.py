@@ -250,20 +250,21 @@ class TestCustomFieldsAPI(DirectoriesMixin, APITestCase):
             value_select="def-456",
         )
 
-        resp = self.client.patch(
-            f"{self.ENDPOINT}{custom_field_select.id}/",
-            data=json.dumps(
-                {
-                    "extra_data": {
-                        "select_options": [
-                            {"label": "Option 1", "id": "abc-123"},
-                            {"label": "Option 3", "id": "ghi-789"},
-                        ],
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.patch(
+                f"{self.ENDPOINT}{custom_field_select.id}/",
+                data=json.dumps(
+                    {
+                        "extra_data": {
+                            "select_options": [
+                                {"label": "Option 1", "id": "abc-123"},
+                                {"label": "Option 3", "id": "ghi-789"},
+                            ],
+                        },
                     },
-                },
-            ),
-            content_type="application/json",
-        )
+                ),
+                content_type="application/json",
+            )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
         data = resp.json()
@@ -323,9 +324,16 @@ class TestCustomFieldsAPI(DirectoriesMixin, APITestCase):
                 {"label": "Option 1", "id": "abc-123"},
             ],
         }
-        cf_select.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            cf_select.save()
+            mock_delay.assert_not_called()
 
-        mock_delay.assert_called_once_with(kwargs={"custom_field": cf_select})
+        mock_delay.assert_called_once_with(
+            kwargs={
+                "custom_field_id": cf_select.pk,
+                "select_options": [{"label": "Option 1", "id": "abc-123"}],
+            },
+        )
 
     def test_create_custom_field_monetary_validation(self) -> None:
         """

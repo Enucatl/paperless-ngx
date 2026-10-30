@@ -2,6 +2,14 @@ import logging
 
 from paperless.logging import ConsumeTaskFormatter
 from paperless.logging import consume_task_id
+from paperless_worker.logging import ConsumeTaskFormatter as ParentFormatter
+from paperless_worker.logging import consume_task_id as parent_task_id
+
+
+def test_parent_and_application_share_formatter_context() -> None:
+    """Application and parent import paths keep one task correlation context."""
+    assert ParentFormatter is ConsumeTaskFormatter
+    assert parent_task_id is consume_task_id
 
 
 def _make_record(msg: str = "Test message") -> logging.LogRecord:

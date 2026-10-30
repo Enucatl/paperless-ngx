@@ -9,7 +9,6 @@ from documents.models import Document
 from documents.models import WorkflowAction
 from documents.permissions import PermissionsSpec
 from documents.permissions import set_permissions_for_objects
-from documents.templating.workflows import parse_w_workflow_placeholders
 
 logger = logging.getLogger("paperless.workflows.mutations")
 
@@ -71,6 +70,8 @@ def apply_assignment_to_document(
                 )
 
     if action.assign_title:
+        from documents.templating.workflows import parse_w_workflow_placeholders
+
         try:
             title = parse_w_workflow_placeholders(
                 action.assign_title,

@@ -583,8 +583,14 @@ def llm_index_compact() -> None:
         _with_exclusive_access("compaction", lambda: store.compact(force=True))
 
 
-def llm_index_remove_document(document: Document):
+def llm_index_remove_document(
+    document: Document | None = None,
+    *,
+    document_id: int | None = None,
+) -> None:
     """Remove a document's chunks from the LLM index."""
+    if document_id is None:
+        document_id = document.id
     with write_store() as store:
         migration_result = _check_and_run_migrations(store)
         if migration_result is MigrationCheckResult.REEMBED_REQUIRED:
@@ -592,7 +598,7 @@ def llm_index_remove_document(document: Document):
                 "Skipping removal of document %s from the LLM index: the "
                 "index requires re-embedding first. Run 'document_llmindex "
                 "rebuild' to resolve.",
-                document.id,
+                document_id,
             )
             return
         if migration_result is MigrationCheckResult.DEFERRED:
@@ -600,10 +606,10 @@ def llm_index_remove_document(document: Document):
                 "Skipping removal of document %s from the LLM index: "
                 "migration check deferred while index readers are active; "
                 "will retry on the next write.",
-                document.id,
+                document_id,
             )
             return
-        store.delete(str(document.id))
+        store.delete(str(document_id))
 
 
 def truncate_content(

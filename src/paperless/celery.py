@@ -6,6 +6,7 @@ from kombu.serialization import register
 
 from paperless.signed_pickle import signed_pickle_dumps
 from paperless.signed_pickle import signed_pickle_loads
+from paperless_worker import child_app
 
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "paperless.settings")
@@ -26,7 +27,7 @@ register(
     content_encoding="binary",
 )
 
-app = Celery("paperless")
+app = child_app if child_app is not None else Celery("paperless")
 
 # Using a string here means the worker doesn't have to serialize
 # the configuration object to child processes.

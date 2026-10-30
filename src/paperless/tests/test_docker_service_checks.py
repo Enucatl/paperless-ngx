@@ -78,16 +78,7 @@ s6-svc() { exec s6-svc "$@"; }
     [
         (
             "svc-worker",
-            [
-                "/usr/local/bin/celery",
-                "--app",
-                "paperless",
-                "worker",
-                "--loglevel",
-                "INFO",
-                "--without-mingle",
-                "--without-gossip",
-            ],
+            ["python3", "-m", "paperless.worker"],
         ),
         (
             "svc-scheduler",
@@ -121,6 +112,89 @@ def test_service_exec(
     assert result["cwd"] == str(ROOT / "src")
     assert result["skip"] == (None if service == "svc-consumer" else "1")
     assert "CELERY_SKIP_CHECKS" not in service_env
+
+
+@pytest.mark.parametrize("non_root", ["", "1"])
+def test_lean_worker_opt_in(service_env: dict[str, str], non_root: str) -> None:
+    """Only the explicit flag changes the worker entrypoint in either branch."""
+    service_env.update(USER_IS_NON_ROOT=non_root, PAPERLESS_USE_LEAN_WORKER="1")
+    result = launch_spy("svc-worker", service_env)
+    assert result["argv"] == (
+        ([] if non_root else ["s6-setuidgid", "paperless"])
+        + ["python3", "-m", "paperless_worker"]
+    )
+    assert result["skip"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("configured", "environment", "expected"),
+    [(None, None, 1), (3, None, 3), (3, 2, 2)],
+)
+def test_worker_autoscale_configuration(
+    service_env: dict[str, str],
+    configured: int | None,
+    environment: int | None,
+    expected: int,
+) -> None:
+    """Resolve worker limits through the existing configuration precedence."""
+    if configured is not None:
+        Path(service_env["PAPERLESS_CONFIGURATION_PATH"]).write_text(
+            f"PAPERLESS_TASK_WORKERS={configured}\n",
+        )
+    if environment is not None:
+        service_env["PAPERLESS_TASK_WORKERS"] = str(environment)
+    code = """
+import json
+import runpy
+from unittest.mock import patch
+with patch('paperless.celery.app.worker_main') as worker:
+    runpy.run_module('paperless.worker', run_name='__main__')
+worker.assert_called_once()
+print(json.dumps(worker.call_args.args[0]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT / "src",
+        env=service_env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert json.loads(result.stdout.splitlines()[-1]) == [
+        "worker",
+        "--autoscale",
+        f"{expected},0",
+        "--loglevel",
+        "INFO",
+        "--without-mingle",
+        "--without-gossip",
+    ]
+
+
+@pytest.mark.parametrize("maximum", [0, -1])
+def test_worker_rejects_nonpositive_limit(
+    service_env: dict[str, str],
+    maximum: int,
+) -> None:
+    """Never start an autoscaling pool that cannot execute queued tasks."""
+    code = (
+        "from unittest.mock import patch\n"
+        "from paperless.worker import main\n"
+        "with patch('paperless.worker.app') as app:\n"
+        f"    app.conf.worker_concurrency = {maximum}\n"
+        "    main()\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT / "src",
+        env=service_env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "PAPERLESS_TASK_WORKERS must be greater than zero" in result.stderr
 
 
 @pytest.mark.parametrize("non_root", ["", "1"])

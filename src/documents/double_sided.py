@@ -8,8 +8,8 @@ from typing import Final
 from django.conf import settings
 from pikepdf import Pdf
 
-from documents.consumer import ConsumerError
 from documents.converters import convert_from_tiff_to_pdf
+from documents.exceptions import ConsumerError
 from documents.plugins.base import ConsumeTaskPlugin
 from documents.plugins.base import NoCleanupPluginMixin
 from documents.plugins.base import NoSetupPluginMixin

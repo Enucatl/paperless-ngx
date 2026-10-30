@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import logging
 import shutil
-import traceback as _tb
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -670,7 +669,12 @@ def update_filename_and_move_files(
 
 
 @shared_task
-def process_cf_select_update(custom_field: CustomField) -> None:
+def process_cf_select_update(
+    custom_field: CustomField | None = None,
+    *,
+    custom_field_id: int | None = None,
+    select_options: list[dict[str, str]] | None = None,
+) -> None:
     """
     Update documents tied to a select custom field:
 
@@ -679,17 +683,20 @@ def process_cf_select_update(custom_field: CustomField) -> None:
     of all documents that have this custom field.
     2. If a 'Select' field option was removed, we need to nullify the custom field instances that have the option.
     """
-    select_options = {
-        option["id"]: option["label"]
-        for option in custom_field.extra_data.get("select_options", [])
-    }
+    if custom_field is not None:
+        custom_field_id = custom_field.pk
+        select_options = custom_field.extra_data.get("select_options", [])
+    if custom_field_id is None or select_options is None:
+        raise ValueError("A custom field ID and select-option snapshot are required.")
+    option_labels = {option["id"]: option["label"] for option in select_options}
+    fields = CustomFieldInstance.objects.filter(field_id=custom_field_id)
 
     # Clear select values that no longer exist
-    custom_field.fields.exclude(
-        value_select__in=select_options.keys(),
+    fields.exclude(
+        value_select__in=option_labels.keys(),
     ).update(value_select=None)
 
-    for cf_instance in custom_field.fields.select_related("document").iterator():
+    for cf_instance in fields.select_related("document").iterator():
         # Update the filename and move files if necessary
         update_filename_and_move_files(CustomFieldInstance, cf_instance)
 
@@ -709,7 +716,15 @@ def check_paths_and_prune_custom_fields(
         and instance.fields.count() > 0
         and instance.extra_data
     ):  # Only select fields, for now
-        process_cf_select_update.apply_async(kwargs={"custom_field": instance})
+        process_cf_select_update.apply_async_on_commit(
+            kwargs={
+                "custom_field_id": instance.pk,
+                "select_options": [
+                    option.copy()
+                    for option in instance.extra_data.get("select_options", [])
+                ],
+            },
+        )
 
 
 @receiver(models.signals.post_delete, sender=CustomField)
@@ -1311,45 +1326,15 @@ def task_failure_handler(
     if sender and sender.name not in TRACKED_TASKS:  # pragma: no cover
         return
     try:
-        close_old_connections()
+        from paperless_worker.outcome_helper import apply_outcome
+        from paperless_worker.outcomes import failure_data
 
-        result_data: dict = {
-            "error_type": type(exception).__name__ if exception else "Unknown",
-            "error_message": str(exception) if exception else "Unknown error",
-        }
-        if traceback:
-            # billiard/celery pass a pre-formatted string instead of a real
-            # traceback object when the worker process itself died (e.g.
-            # WorkerLostError from a SIGILL) since there's no live traceback
-            # to walk in that case.
-            tb_str = (
-                traceback
-                if isinstance(traceback, str)
-                else "".join(
-                    _tb.format_tb(traceback),
-                )
-            )
-            result_data["traceback"] = tb_str[:5000]
-
-        now = timezone.now()
-        update_fields: dict = {
-            "status": PaperlessTask.Status.FAILURE,
-            "result_data": result_data,
-            "date_done": now,
-        }
-
-        task_qs = PaperlessTask.objects.filter(task_id=task_id)
-        task_instance = task_qs.values("date_started", "date_created").first()
-        if task_instance:
-            date_started = task_instance["date_started"]
-            if date_started:
-                update_fields["duration_seconds"] = (now - date_started).total_seconds()
-            date_created = task_instance["date_created"]
-            if date_started and date_created:
-                update_fields["wait_time_seconds"] = (
-                    date_started - date_created
-                ).total_seconds()
-            task_qs.update(**update_fields)
+        apply_outcome(
+            task_id,
+            PaperlessTask.Status.FAILURE,
+            failure_data(exception, traceback),
+            timezone.now(),
+        )
     except Exception:  # pragma: no cover
         logger.exception("Updating PaperlessTask on failure failed")
 
@@ -1380,18 +1365,14 @@ def task_revoked_handler(
     if sender and sender.name not in TRACKED_TASKS:  # pragma: no cover
         return
     try:
-        close_old_connections()
-        reason = "Task revoked before completion."
-        if expired:
-            reason = "Task expired before execution."
-        elif terminated:
-            reason = "Task terminated during execution."
-        PaperlessTask.objects.filter(task_id=task_id).update(
-            status=PaperlessTask.Status.REVOKED,
-            date_done=timezone.now(),
-            result_data={
-                "reason": (reason + " Check worker logs for details."),
-            },
+        from paperless_worker.outcome_helper import apply_outcome
+        from paperless_worker.outcomes import revoked_data
+
+        apply_outcome(
+            task_id,
+            PaperlessTask.Status.REVOKED,
+            revoked_data(expired=expired, terminated=terminated),
+            timezone.now(),
         )
     except Exception:  # pragma: no cover
         logger.exception("Updating PaperlessTask on revocation failed")
@@ -1436,7 +1417,9 @@ def add_or_update_document_in_llm_index(sender, document, **kwargs):
     if ai_config.llm_index_enabled:
         from documents.tasks import update_document_in_llm_index
 
-        update_document_in_llm_index.apply_async(kwargs={"document": document})
+        update_document_in_llm_index.apply_async_on_commit(
+            kwargs={"document_id": document.pk},
+        )
 
 
 @receiver(models.signals.post_delete, sender=Document)
@@ -1452,4 +1435,6 @@ def delete_document_from_llm_index(
     if ai_config.llm_index_enabled:
         from documents.tasks import remove_document_from_llm_index
 
-        remove_document_from_llm_index.apply_async(kwargs={"document": instance})
+        remove_document_from_llm_index.apply_async_on_commit(
+            kwargs={"document_id": instance.pk},
+        )

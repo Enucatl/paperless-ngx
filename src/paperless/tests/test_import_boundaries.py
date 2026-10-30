@@ -47,6 +47,19 @@ _REQUIRED_TASKS = (
     "}\n"
     "assert not required.difference(app.tasks), required.difference(app.tasks)\n"
 )
+_CONSUMER_ERROR_PICKLE = """
+import django
+django.setup()
+import pickle
+import sys
+from documents.consumer import ConsumerError
+from documents.exceptions import ConsumerError as SharedError
+assert ConsumerError is SharedError
+payload = pickle.dumps(ConsumerError('missing file'), protocol=0)
+legacy = payload.replace(b'documents.exceptions', b'documents.consumer')
+assert type(pickle.loads(legacy)) is SharedError
+sys.stdout.buffer.write(payload)
+"""
 
 
 @pytest.mark.parametrize(
@@ -72,8 +85,25 @@ _REQUIRED_TASKS = (
             "from paperless.celery import app\n"
             "app.autodiscover_tasks(force=True)\n"
             "app.finalize()\n" + _REQUIRED_TASKS,
-            _PROCESSING_MODULES,
+            (
+                *_PROCESSING_MODULES,
+                "documents.templating.filepath",
+                "documents.templating.workflows",
+                "babel",
+            ),
             id="celery-discovers-tasks-and-callbacks",
+        ),
+        pytest.param(
+            "import django\n"
+            "django.setup()\n"
+            "import pickle, subprocess\n"
+            f"payload = subprocess.check_output([sys.executable, '-c', {_CONSUMER_ERROR_PICKLE!r}])\n"
+            "from documents.exceptions import ConsumerError\n"
+            "error = pickle.loads(payload)\n"
+            "assert type(error) is ConsumerError\n"
+            "assert error.args == ('missing file',)\n",
+            _PROCESSING_MODULES,
+            id="consumer-error-unpickling-without-processing",
         ),
         pytest.param(
             "import django\n"
@@ -142,6 +172,12 @@ _REQUIRED_TASKS = (
             "import django\n"
             "django.setup()\n"
             "from django.core.checks import run_checks\n"
+            "from django.core.checks.registry import registry\n"
+            "registered = set(registry.get_checks())\n"
+            "from documents.checks import parser_check, filename_format_check\n"
+            "from documents import parser_check as legacy_parser_check\n"
+            "assert legacy_parser_check is parser_check\n"
+            "assert {parser_check, filename_format_check} <= registered\n"
             "errors = [message for message in run_checks() if message.is_serious()]\n"
             "assert not errors, errors\n",
             _UNUSED_IMPLEMENTATIONS,

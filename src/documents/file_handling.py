@@ -5,8 +5,6 @@ from pathlib import Path
 from django.conf import settings
 
 from documents.models import Document
-from documents.templating.filepath import is_safe_relative_path
-from documents.templating.filepath import validate_filepath_template_and_render
 from documents.templating.utils import convert_format_str_to_template_format
 
 logger = logging.getLogger("paperless.filehandling")
@@ -123,6 +121,9 @@ def generate_unique_filename(doc, *, archive_filename=False) -> Path:
 
 
 def format_filename(document: Document, template_str: str) -> str | None:
+    from documents.templating.filepath import is_safe_relative_path
+    from documents.templating.filepath import validate_filepath_template_and_render
+
     rendered_filename = validate_filepath_template_and_render(
         template_str,
         document,

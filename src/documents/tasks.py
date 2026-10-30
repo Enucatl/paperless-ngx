@@ -807,21 +807,46 @@ def apply_ai_suggestions(self, action_id: int, document_id: int) -> None:
 
     ai_config = AIConfig()
     if ai_config.llm_index_enabled:
-        update_document_in_llm_index.apply_async(kwargs={"document": document})
+        update_document_in_llm_index.apply_async_on_commit(
+            kwargs={"document_id": document.pk},
+        )
 
 
 @shared_task
-def update_document_in_llm_index(document) -> None:
+def update_document_in_llm_index(
+    document: Document | None = None,
+    *,
+    document_id: int | None = None,
+) -> None:
+    """Load newly queued document IDs in the child, accepting legacy model payloads."""
+    if not AIConfig().llm_index_enabled:
+        return
+
+    if document is None:
+        document = Document.objects.filter(pk=document_id).first()
+        if document is None:
+            return
+
     from paperless_ai.indexing import llm_index_add_or_update_document
 
     llm_index_add_or_update_document(document)
 
 
 @shared_task
-def remove_document_from_llm_index(document) -> None:
+def remove_document_from_llm_index(
+    document: Document | None = None,
+    *,
+    document_id: int | None = None,
+) -> None:
+    """Remove a deleted document by ID without fetching its former database row."""
+    if not AIConfig().llm_index_enabled:
+        return
+
     from paperless_ai.indexing import llm_index_remove_document
 
-    llm_index_remove_document(document)
+    llm_index_remove_document(
+        document_id=document_id if document_id is not None else document.pk,
+    )
 
 
 @shared_task
