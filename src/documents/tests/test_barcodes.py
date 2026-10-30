@@ -1437,7 +1437,7 @@ class TestBarcodeValues:
             - The stored barcodes are kept
         """
         document = consume_sample("barcode-qr-url.pdf")
-        mocker.patch("documents.tasks.read_barcode_values", **read_values)
+        mocker.patch("documents.barcodes.read_barcode_values", **read_values)
 
         tasks.update_document_content_maybe_archive_file(document.pk)
 

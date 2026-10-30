@@ -23,6 +23,7 @@ import tantivy
 from django.conf import settings
 from django.utils.timezone import get_current_timezone
 
+from documents.exceptions import SearchIndexLockError
 from documents.search._query import extract_cjk_text
 from documents.search._query import normalize_search_text
 from documents.search._query import parse_simple_text_highlight_query
@@ -175,10 +176,6 @@ class TantivyRelevanceList:
     def get_all_ids(self) -> list[int]:
         """Return all matching document IDs in display order."""
         return self._ordered_ids
-
-
-class SearchIndexLockError(Exception):
-    """Raised when the search index file lock cannot be acquired within the timeout."""
 
 
 class WriteBatch:

@@ -20,9 +20,6 @@ from typing import Self
 import httpx
 from django.conf import settings
 from django.utils import timezone
-from gotenberg_client import GotenbergClient
-from gotenberg_client.options import PdfAFormat
-from tika_client import TikaClient
 
 from documents.parsers import ParseError
 from documents.parsers import make_thumbnail_from_pdf
@@ -33,6 +30,9 @@ from paperless.version import __full_version_str__
 if TYPE_CHECKING:
     import datetime
     from types import TracebackType
+
+    from gotenberg_client import GotenbergClient
+    from tika_client import TikaClient
 
     from paperless.parsers import MetadataEntry
     from paperless.parsers import ParserContext
@@ -178,6 +178,9 @@ class TikaDocumentParser:
         self._gotenberg_client: GotenbergClient | None = None
 
     def __enter__(self) -> Self:
+        from gotenberg_client import GotenbergClient
+        from tika_client import TikaClient
+
         self._tika_client = self._exit_stack.enter_context(
             TikaClient(
                 tika_url=settings.TIKA_ENDPOINT,
@@ -413,6 +416,8 @@ class TikaDocumentParser:
         documents.parsers.ParseError
             If Gotenberg returns an error.
         """
+        from gotenberg_client.options import PdfAFormat
+
         if TYPE_CHECKING:
             assert self._gotenberg_client is not None
 

@@ -13,8 +13,6 @@ from documents.models import StoragePath
 from documents.models import Tag
 from documents.models import WorkflowAction
 from paperless.config import AIConfig
-from paperless_ai.ai_classifier import get_ai_document_classification
-from paperless_ai.ai_classifier import get_llm_output_language
 from paperless_ai.matching import extract_unmatched_names
 from paperless_ai.matching import match_correspondents_by_name
 from paperless_ai.matching import match_document_types_by_name
@@ -147,6 +145,9 @@ def apply_ai_suggestions_to_document(
             extra={"group": logging_group},
         )
         return []
+
+    from paperless_ai.ai_classifier import get_ai_document_classification
+    from paperless_ai.ai_classifier import get_llm_output_language
 
     # Workflows run without a user, so we use the document owner
     owner = document.owner

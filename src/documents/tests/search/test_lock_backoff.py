@@ -26,6 +26,16 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.search
 
 
+def test_lock_exception_identity_and_task_retry_contract() -> None:
+    """Keep existing imports and Celery retry handling tied to one exception class."""
+    from documents.exceptions import SearchIndexLockError as SharedLockError
+    from documents.search import SearchIndexLockError as PublicLockError
+
+    assert SearchIndexLockError is SharedLockError is PublicLockError
+    assert index_document.autoretry_for == (SharedLockError,)
+    assert remove_document_from_index.autoretry_for == (SharedLockError,)
+
+
 @pytest.fixture
 def disk_backend(tmp_path: Path) -> Generator[TantivyBackend, None, None]:
     """On-disk TantivyBackend so the file-lock code path is exercised."""

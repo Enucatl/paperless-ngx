@@ -32,12 +32,12 @@ class TestIndexOptimize:
 
 
 class TestClassifier(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
-    @mock.patch("documents.tasks.load_classifier")
+    @mock.patch("documents.classifier.load_classifier")
     def test_train_classifier_no_auto_matching(self, load_classifier) -> None:
         tasks.train_classifier()
         load_classifier.assert_not_called()
 
-    @mock.patch("documents.tasks.load_classifier")
+    @mock.patch("documents.classifier.load_classifier")
     def test_train_classifier_with_auto_tag(self, load_classifier) -> None:
         load_classifier.return_value = None
         Tag.objects.create(matching_algorithm=Tag.MATCH_AUTO, name="test")
@@ -46,7 +46,7 @@ class TestClassifier(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
         load_classifier.assert_called_once()
         self.assertIsNotFile(settings.MODEL_FILE)
 
-    @mock.patch("documents.tasks.load_classifier")
+    @mock.patch("documents.classifier.load_classifier")
     def test_train_classifier_with_auto_type(self, load_classifier) -> None:
         load_classifier.return_value = None
         DocumentType.objects.create(matching_algorithm=Tag.MATCH_AUTO, name="test")
@@ -55,7 +55,7 @@ class TestClassifier(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
         load_classifier.assert_called_once()
         self.assertIsNotFile(settings.MODEL_FILE)
 
-    @mock.patch("documents.tasks.load_classifier")
+    @mock.patch("documents.classifier.load_classifier")
     def test_train_classifier_with_auto_correspondent(self, load_classifier) -> None:
         load_classifier.return_value = None
         Correspondent.objects.create(matching_algorithm=Tag.MATCH_AUTO, name="test")
@@ -95,7 +95,7 @@ class TestClassifier(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
 class TestSanityCheck:
     @pytest.fixture
     def mock_check_sanity(self, mocker) -> mock.MagicMock:
-        return mocker.patch("documents.tasks.sanity_checker.check_sanity")
+        return mocker.patch("documents.sanity_checker.check_sanity")
 
     def test_sanity_check_success(self, mock_check_sanity: mock.MagicMock) -> None:
         mock_check_sanity.return_value = SanityCheckMessages()
@@ -322,7 +322,7 @@ class TestUpdateContent(DirectoriesMixin, TestCase):
         )
 
     @override_settings(AI_ENABLED=True, LLM_EMBEDDING_BACKEND="huggingface")
-    @mock.patch("documents.tasks.llm_index_add_or_update_document")
+    @mock.patch("paperless_ai.indexing.llm_index_add_or_update_document")
     @mock.patch("documents.search.get_backend")
     def test_update_content_version_updates_llm_index(
         self,
@@ -450,7 +450,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
             checksum="wow",
         )
         with mock.patch(
-            "documents.tasks.llm_index_add_or_update_document",
+            "paperless_ai.indexing.llm_index_add_or_update_document",
         ) as llm_index_add_or_update_document:
             tasks.update_document_in_llm_index(doc)
             llm_index_add_or_update_document.assert_called_once_with(doc)
@@ -470,7 +470,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
             checksum="wow",
         )
         with mock.patch(
-            "documents.tasks.llm_index_remove_document",
+            "paperless_ai.indexing.llm_index_remove_document",
         ) as llm_index_remove_document:
             tasks.remove_document_from_llm_index(doc)
             llm_index_remove_document.assert_called_once_with(doc)
@@ -495,7 +495,7 @@ class TestAIIndex(DirectoriesMixin, TestCase):
                 "documents.tasks.update_document_in_llm_index",
             ) as update_document_in_llm_index,
             mock.patch(
-                "documents.tasks.update_llm_index",
+                "paperless_ai.indexing.update_llm_index",
             ) as update_llm_index,
         ):
             doc_ids = [doc.pk for doc in docs]

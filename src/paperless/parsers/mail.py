@@ -26,19 +26,9 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.timezone import is_naive
 from django.utils.timezone import make_aware
-from gotenberg_client import GotenbergClient
-from gotenberg_client.constants import A4
-from gotenberg_client.options import Measurement
-from gotenberg_client.options import MeasurementUnitType
-from gotenberg_client.options import PageMarginsType
-from gotenberg_client.options import PdfAFormat
 from humanize import naturalsize
 from imap_tools import MailAttachment
 from imap_tools import MailMessage
-from tika_client import TikaClient
-from turbohtml.clean import Linkify
-from turbohtml.clean import linkify
-from turbohtml.migration.bleach import clean
 
 from documents.parsers import ParseError
 from documents.parsers import make_thumbnail_from_pdf
@@ -49,6 +39,8 @@ from paperless_mail.models import MailRule
 if TYPE_CHECKING:
     import datetime
     from types import TracebackType
+
+    from gotenberg_client.options import PdfAFormat
 
     from paperless.parsers import MetadataEntry
     from paperless.parsers import ParserContext
@@ -449,6 +441,8 @@ class MailDocumentParser:
 
     def _settings_to_gotenberg_pdfa(self) -> PdfAFormat | None:
         """Convert the OCR output type setting to a Gotenberg PdfAFormat."""
+        from gotenberg_client.options import PdfAFormat
+
         if settings.OCR_OUTPUT_TYPE in {
             OutputTypeChoices.PDF_A,
             OutputTypeChoices.PDF_A2,
@@ -520,6 +514,8 @@ class MailDocumentParser:
         logger.info("Sending content to Tika server")
 
         try:
+            from tika_client import TikaClient
+
             with TikaClient(tika_url=settings.TIKA_ENDPOINT) as client:
                 parsed = client.tika.as_text.from_buffer(html, "text/html")
 
@@ -567,6 +563,8 @@ class MailDocumentParser:
         if not mail_message.html:
             archive_path.write_bytes(mail_pdf_file.read_bytes())
         else:
+            from gotenberg_client import GotenbergClient
+
             pdf_of_html_content = self.generate_pdf_from_html(
                 mail_message.html,
                 mail_message.attachments,
@@ -619,6 +617,10 @@ class MailDocumentParser:
         Path
             Path to the rendered HTML file inside the temporary directory.
         """
+
+        from turbohtml.clean import Linkify
+        from turbohtml.clean import linkify
+        from turbohtml.migration.bleach import clean
 
         def clean_html(text: str) -> str:
             """Attempt to clean, escape, and linkify the given HTML string."""
@@ -689,6 +691,12 @@ class MailDocumentParser:
         documents.parsers.ParseError
             If Gotenberg returns an error.
         """
+        from gotenberg_client import GotenbergClient
+        from gotenberg_client.constants import A4
+        from gotenberg_client.options import Measurement
+        from gotenberg_client.options import MeasurementUnitType
+        from gotenberg_client.options import PageMarginsType
+
         logger.info("Converting mail to PDF")
 
         css_file = (
@@ -761,6 +769,12 @@ class MailDocumentParser:
         documents.parsers.ParseError
             If Gotenberg returns an error.
         """
+
+        from gotenberg_client import GotenbergClient
+        from gotenberg_client.constants import A4
+        from gotenberg_client.options import Measurement
+        from gotenberg_client.options import MeasurementUnitType
+        from gotenberg_client.options import PageMarginsType
 
         def clean_html_script(text: str) -> str:
             compiled_open = re.compile(re.escape("<script"), re.IGNORECASE)

@@ -113,7 +113,6 @@ from documents.caching import refresh_suggestions_cache
 from documents.caching import set_llm_suggestions_cache
 from documents.caching import set_metadata_cache
 from documents.caching import set_suggestions_cache
-from documents.classifier import load_classifier
 from documents.conditionals import metadata_etag
 from documents.conditionals import metadata_last_modified
 from documents.conditionals import preview_etag
@@ -182,7 +181,6 @@ from documents.permissions import set_permissions_for_objects
 from documents.permissions import user_is_unrestricted
 from documents.plugins.date_parsing import get_date_parser
 from documents.schema import generate_object_with_permissions_schema
-from documents.search import SearchHit
 from documents.serialisers import AcknowledgeTasksViewSerializer
 from documents.serialisers import BulkDownloadSerializer
 from documents.serialisers import BulkEditObjectsSerializer
@@ -250,9 +248,6 @@ from paperless.parsers.remote import RemoteEngineConfig
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import UserSerializer
 from paperless.views import StandardPagination
-from paperless_ai.ai_classifier import get_ai_document_classification
-from paperless_ai.ai_classifier import get_llm_output_language
-from paperless_ai.chat import stream_chat_with_documents
 from paperless_ai.exceptions import LLMProviderError
 from paperless_ai.exceptions import LLMTimeoutError
 from paperless_ai.matching import extract_unmatched_names
@@ -274,6 +269,7 @@ if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
 
 if TYPE_CHECKING:
+    from documents.search import SearchHit
     from paperless_ai.base_model import TaxonomyChoiceDict
 
 
@@ -373,7 +369,7 @@ class SearchParams(NamedTuple):
 
 class SearchResultPage(NamedTuple):
     ordered_ids: list[int]
-    hits: list[SearchHit]
+    hits: list["SearchHit"]
     page_offset: int
 
 
@@ -1552,6 +1548,8 @@ class DocumentViewSet(
             refresh_suggestions_cache(doc.pk)
             return Response(document_suggestions.suggestions)
 
+        from documents.classifier import load_classifier
+
         classifier = load_classifier()
 
         dates = []
@@ -1613,6 +1611,8 @@ class DocumentViewSet(
         if not ai_config.ai_enabled:
             return HttpResponseBadRequest("AI is required for this feature")
 
+        from paperless_ai.ai_classifier import get_llm_output_language
+
         output_language = get_llm_output_language(
             ai_config=ai_config,
             user=request.user,
@@ -1648,6 +1648,8 @@ class DocumentViewSet(
             llm_suggestions = cached_llm_suggestions.suggestions
         else:
             try:
+                from paperless_ai.ai_classifier import get_ai_document_classification
+
                 llm_suggestions = get_ai_document_classification(
                     doc,
                     request.user,
@@ -2446,10 +2448,14 @@ class ChatStreamingView(GenericAPIView[Any]):
             )
             unrestricted = user_is_unrestricted(request.user)
 
+        from paperless_ai.ai_classifier import get_llm_output_language
+
         output_language = get_llm_output_language(
             ai_config=ai_config,
             user=request.user,
         )
+
+        from paperless_ai.chat import stream_chat_with_documents
 
         response = StreamingHttpResponse(
             stream_chat_with_documents(

@@ -18,27 +18,14 @@ from django.db.models.signals import post_save
 from django.utils import timezone
 from filelock import FileLock
 
-from documents import sanity_checker
-from documents.barcodes import BarcodePlugin
-from documents.barcodes import read_barcode_values
-from documents.bulk_download import ArchiveOnlyStrategy
-from documents.bulk_download import OriginalsOnlyStrategy
 from documents.caching import clear_document_caches
-from documents.classifier import DocumentClassifier
-from documents.classifier import load_classifier
-from documents.consumer import AsnCheckPlugin
-from documents.consumer import ConsumeFileDuplicateError
-from documents.consumer import ConsumerPlugin
-from documents.consumer import ConsumerPreflightPlugin
-from documents.consumer import WorkflowTriggerPlugin
-from documents.consumer import should_produce_archive
 from documents.data_models import ConsumableDocument
 from documents.data_models import ConsumeFileDuplicateResult
 from documents.data_models import ConsumeFileStoppedResult
 from documents.data_models import ConsumeFileSuccessResult
 from documents.data_models import DocumentMetadataOverrides
 from documents.data_models import StoredBarcode
-from documents.double_sided import CollatePlugin
+from documents.exceptions import SearchIndexLockError
 from documents.file_handling import create_source_path_directory
 from documents.file_handling import generate_unique_filename
 from documents.matching import prefilter_documents_by_workflowtrigger
@@ -58,8 +45,6 @@ from documents.plugins.base import ConsumeTaskPlugin
 from documents.plugins.base import StopConsumeTaskError
 from documents.plugins.helpers import ProgressManager
 from documents.plugins.helpers import ProgressStatusOptions
-from documents.sanity_checker import SanityCheckFailedException
-from documents.search._backend import SearchIndexLockError
 from documents.signals import document_updated
 from documents.signals.handlers import cleanup_document_deletion
 from documents.signals.handlers import run_workflows
@@ -76,9 +61,6 @@ from paperless.logging import consume_task_id
 from paperless.parsers import ParserContext
 from paperless.parsers.registry import get_parser_registry
 from paperless_ai.exceptions import LLMTimeoutError
-from paperless_ai.indexing import llm_index_add_or_update_document
-from paperless_ai.indexing import llm_index_remove_document
-from paperless_ai.indexing import update_llm_index
 
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
@@ -166,6 +148,9 @@ def train_classifier(
             settings.MODEL_FILE.unlink()
         return result
 
+    from documents.classifier import DocumentClassifier
+    from documents.classifier import load_classifier
+
     classifier = load_classifier()
 
     if not classifier:
@@ -193,6 +178,14 @@ def consume_file(
     | ConsumeFileDuplicateResult
     | None
 ):
+    from documents.barcodes import BarcodePlugin
+    from documents.consumer import AsnCheckPlugin
+    from documents.consumer import ConsumeFileDuplicateError
+    from documents.consumer import ConsumerPlugin
+    from documents.consumer import ConsumerPreflightPlugin
+    from documents.consumer import WorkflowTriggerPlugin
+    from documents.double_sided import CollatePlugin
+
     token = consume_task_id.set((self.request.id or "")[:8])
     try:
         # Default no overrides
@@ -284,6 +277,9 @@ def consume_file(
 
 @shared_task
 def sanity_check(*, raise_on_error: bool = True) -> str:
+    from documents import sanity_checker
+    from documents.sanity_checker import SanityCheckFailedException
+
     messages = sanity_checker.check_sanity()
     messages.log_messages()
 
@@ -339,6 +335,8 @@ def bulk_update_documents(document_ids) -> None:
 
     ai_config = AIConfig()
     if ai_config.llm_index_enabled:
+        from paperless_ai.indexing import update_llm_index
+
         update_llm_index(
             rebuild=False,
             document_ids=document_ids,
@@ -356,6 +354,8 @@ def _read_barcodes_for_reprocess(document: Document) -> list[StoredBarcode] | No
     if not barcode_settings.barcode_store_values:
         return None
     try:
+        from documents.barcodes import read_barcode_values
+
         with TemporaryDirectory(dir=settings.SCRATCH_DIR) as tmpdir:
             return read_barcode_values(
                 document.source_path,
@@ -381,6 +381,8 @@ def update_document_content_maybe_archive_file(
     Remote OCR is used only when the engine is configured to handle everything
     or if explicitly asked for via ``remote_ocr``.
     """
+    from documents.consumer import should_produce_archive
+
     document = Document.objects.get(id=document_id)
 
     mime_type = document.mime_type
@@ -499,6 +501,8 @@ def update_document_content_maybe_archive_file(
 
             ai_config = AIConfig()
             if ai_config.llm_index_enabled:
+                from paperless_ai.indexing import llm_index_add_or_update_document
+
                 llm_index_add_or_update_document(document)
 
             clear_document_caches(document.pk)
@@ -800,11 +804,15 @@ def apply_ai_suggestions(self, action_id: int, document_id: int) -> None:
 
 @shared_task
 def update_document_in_llm_index(document) -> None:
+    from paperless_ai.indexing import llm_index_add_or_update_document
+
     llm_index_add_or_update_document(document)
 
 
 @shared_task
 def remove_document_from_llm_index(document) -> None:
+    from paperless_ai.indexing import llm_index_remove_document
+
     llm_index_remove_document(document)
 
 
@@ -842,6 +850,9 @@ def build_share_link_bundle(bundle_id: int) -> None:
     temp_zip_path = Path(temp_zip_path_str)
 
     try:
+        from documents.bulk_download import ArchiveOnlyStrategy
+        from documents.bulk_download import OriginalsOnlyStrategy
+
         strategy_class = (
             ArchiveOnlyStrategy
             if bundle.file_version == ShareLink.FileVersion.ARCHIVE

@@ -431,7 +431,7 @@ class ShareLinkBundleBuildTaskTests(DirectoriesMixin, APITestCase):
 
         with (
             mock.patch(
-                "documents.tasks.OriginalsOnlyStrategy.add_document",
+                "documents.bulk_download.OriginalsOnlyStrategy.add_document",
                 side_effect=RuntimeError("zip failure"),
             ),
             mock.patch("pathlib.Path.unlink") as unlink_mock,

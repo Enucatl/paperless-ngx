@@ -2,10 +2,12 @@ import email
 import email.contentmanager
 import shutil
 import subprocess
+import sys
 import tempfile
 from email.message import Message
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
+from pathlib import Path
 from unittest import mock
 
 import gnupg
@@ -18,6 +20,28 @@ from paperless_mail.preprocessor import MailMessageDecryptor
 from paperless_mail.tests.factories import MailAccountFactory
 from paperless_mail.tests.helpers import _AttachmentDef
 from paperless_mail.tests.test_mail import TestMail
+
+
+def test_disabled_decryptor_does_not_import_gnupg() -> None:
+    """Keep GPG unloaded when discovering a disabled mail preprocessor."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "from django.conf import settings\n"
+                "settings.configure(EMAIL_ENABLE_GPG_DECRYPTOR=False)\n"
+                "from paperless_mail.preprocessor import MailMessageDecryptor\n"
+                "assert not MailMessageDecryptor.able_to_run()\n"
+                "assert 'gnupg' not in sys.modules\n"
+            ),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 class MessageEncryptor:

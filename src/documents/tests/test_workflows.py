@@ -5834,7 +5834,7 @@ class TestApplyAISuggestionsWorkflowAction(
         suggestions: ClassificationSuggestions = SUGGESTIONS,
     ) -> list[str]:
         with mock.patch(
-            "documents.workflows.ai.get_ai_document_classification",
+            "paperless_ai.ai_classifier.get_ai_document_classification",
             return_value=suggestions,
         ):
             changed = apply_ai_suggestions_to_document(action, self.doc)
@@ -5997,7 +5997,7 @@ class TestApplyAISuggestionsWorkflowAction(
 
                 with (
                     mock.patch(
-                        "documents.workflows.ai.get_ai_document_classification",
+                        "paperless_ai.ai_classifier.get_ai_document_classification",
                     ) as get_classification,
                     self.assertLogs(
                         "paperless.workflows.ai",
@@ -6026,7 +6026,7 @@ class TestApplyAISuggestionsWorkflowAction(
 
         with (
             mock.patch(
-                "documents.workflows.ai.get_ai_document_classification",
+                "paperless_ai.ai_classifier.get_ai_document_classification",
                 side_effect=ValueError("nope"),
             ),
             self.assertLogs("paperless.workflows.ai", level="ERROR") as cm,
@@ -6052,7 +6052,7 @@ class TestApplyAISuggestionsWorkflowAction(
 
         with (
             mock.patch(
-                "documents.workflows.ai.get_ai_document_classification",
+                "paperless_ai.ai_classifier.get_ai_document_classification",
                 side_effect=LLMTimeoutError(),
             ),
             self.assertRaises(LLMTimeoutError),
@@ -6345,7 +6345,7 @@ class TestApplyAISuggestionsWorkflowAction(
         )
 
         with mock.patch(
-            "documents.workflows.ai.get_ai_document_classification",
+            "paperless_ai.ai_classifier.get_ai_document_classification",
             return_value={**SUGGESTIONS, "dates": ["not a date", "2019-07-04"]},
         ):
             changed = apply_ai_suggestions_to_document(action, self.doc)

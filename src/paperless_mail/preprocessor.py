@@ -5,7 +5,6 @@ from email.message import Message
 from pathlib import Path
 
 from django.conf import settings
-from gnupg import GPG
 from imap_tools import MailMessage
 
 from documents.loggers import LoggingMixin
@@ -40,6 +39,8 @@ class MailMessageDecryptor(MailMessagePreprocessor, LoggingMixin):
     NAME = "MailMessageDecryptor"
 
     def __init__(self) -> None:
+        from gnupg import GPG
+
         super().__init__()
         self.renew_logging_group()
         self._gpg = GPG(gnupghome=settings.EMAIL_GNUPG_HOME)
